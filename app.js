@@ -1,4 +1,517 @@
-// RK INFOTECH Business Management App JavaScript
+// RK INFOTECH Business Management App with Supabase Integration
+
+// Supabase Configuration
+const SUPABASE_CONFIG = {
+  url: 'https://tgnriyzxnkglnwahjdhi.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnbnJpeXp4bmtnbG53YWhqZGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk2MDI2MjAsImV4cCI6MjA3NTE3ODYyMH0.FZRWkiZYU3srY0kH0IewZfoQKocmOHuCsOsrBM1sZSI'
+};
+
+// Database Service Layer
+class DatabaseService {
+  constructor() {
+    this.supabase = null;
+    this.isConnected = false;
+    this.subscriptions = new Map();
+    this.initializeSupabase();
+  }
+
+  async initializeSupabase() {
+    try {
+      if (SUPABASE_CONFIG.url === 'YOUR_SUPABASE_URL' || SUPABASE_CONFIG.anonKey === 'YOUR_SUPABASE_ANON_KEY') {
+        console.warn('Supabase not configured. Using local storage fallback.');
+        this.updateConnectionStatus(false, 'Not configured');
+        return;
+      }
+
+      this.supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+      
+      // Test connection
+      const { data, error } = await this.supabase.from('company_settings').select('*').limit(1);
+      
+      if (error && error.code === '42P01') {
+        // Table doesn't exist - show setup instructions
+        this.updateConnectionStatus(false, 'Database schema not set up');
+        this.showSchemaSetupInstructions();
+      } else if (error) {
+        throw error;
+      } else {
+        this.isConnected = true;
+        this.updateConnectionStatus(true, 'Connected');
+        await this.setupRealtimeSubscriptions();
+      }
+    } catch (error) {
+      console.error('Supabase initialization error:', error);
+      this.updateConnectionStatus(false, `Error: ${error.message}`);
+    }
+  }
+
+  updateConnectionStatus(connected, message) {
+    this.isConnected = connected;
+    
+    const connectionDot = document.getElementById('connectionDot');
+    const connectionText = document.getElementById('connectionText');
+    const headerStatusDot = document.getElementById('headerStatusDot');
+    const cloudStatusBadge = document.getElementById('cloudStatusBadge');
+
+    if (connectionDot) {
+      connectionDot.className = `connection-dot ${connected ? 'connected' : 'disconnected'}`;
+    }
+    
+    if (connectionText) {
+      connectionText.textContent = message;
+    }
+
+    if (headerStatusDot) {
+      headerStatusDot.className = `status-dot ${connected ? 'connected' : 'disconnected'}`;
+    }
+
+    if (cloudStatusBadge) {
+      cloudStatusBadge.className = `status-badge ${connected ? 'active' : 'offline'}`;
+      cloudStatusBadge.innerHTML = connected ? 
+        '<div class="loading-dot"></div>Synced' : 
+        '<div class="loading-dot"></div>Offline';
+    }
+
+    // Update database configuration status
+    const dbConfigStatus = document.getElementById('dbConfigStatus');
+    if (dbConfigStatus) {
+      if (connected) {
+        dbConfigStatus.innerHTML = '<p class="config-message text-success">✅ Database connected and ready</p>';
+      } else {
+        dbConfigStatus.innerHTML = `<p class="config-message text-error">❌ ${message}</p>`;
+      }
+    }
+
+    // Show/hide offline banner
+    this.toggleOfflineBanner(!connected);
+  }
+
+  toggleOfflineBanner(show) {
+    let banner = document.getElementById('offlineBanner');
+    if (show && !banner) {
+      banner = document.createElement('div');
+      banner.id = 'offlineBanner';
+      banner.className = 'offline-mode';
+      banner.innerHTML = '📡 Working in offline mode - Changes will sync when connection is restored';
+      document.body.appendChild(banner);
+    } else if (!show && banner) {
+      banner.remove();
+    }
+  }
+
+  showSchemaSetupInstructions() {
+    const setupStatus = document.getElementById('setupStatus');
+    if (setupStatus) {
+      setupStatus.innerHTML = `
+        <div class="status-indicator">
+          <div class="status-dot disconnected"></div>
+          <span>Database schema setup required</span>
+        </div>
+        <div class="setup-sql" style="margin-top: 16px;">
+          <h5>Run these SQL commands in your Supabase SQL Editor:</h5>
+          <textarea class="form-control" rows="10" readonly style="font-family: monospace; font-size: 12px;">
+-- Create employees table
+CREATE TABLE employees (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  designation TEXT,
+  department TEXT,
+  email TEXT UNIQUE,
+  phone TEXT,
+  bank_account TEXT,
+  ifsc TEXT,
+  pan_number TEXT,
+  basic_salary DECIMAL(10,2),
+  hra DECIMAL(10,2),
+  da DECIMAL(10,2),
+  medical_allowance DECIMAL(10,2),
+  conveyance_allowance DECIMAL(10,2),
+  join_date DATE,
+  address TEXT,
+  emergency_contact TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create attendance table
+CREATE TABLE attendance (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  employee_id UUID REFERENCES employees(id),
+  date DATE NOT NULL,
+  check_in TIME,
+  check_out TIME,
+  total_hours INTERVAL,
+  location TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create invoices table
+CREATE TABLE invoices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_number TEXT UNIQUE NOT NULL,
+  client_name TEXT NOT NULL,
+  client_address TEXT,
+  client_gst TEXT,
+  items JSONB,
+  total_amount DECIMAL(10,2),
+  tax_amount DECIMAL(10,2),
+  grand_total DECIMAL(10,2),
+  status TEXT DEFAULT 'draft',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create clients table
+CREATE TABLE clients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  address TEXT,
+  phone TEXT,
+  email TEXT,
+  gst TEXT,
+  contact_person TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Create company_settings table
+CREATE TABLE company_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  address TEXT,
+  phone TEXT,
+  email TEXT,
+  gst TEXT,
+  logo_url TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+          </textarea>
+          <p style="margin-top: 12px; font-size: 12px; color: var(--color-text-secondary);">
+            After running these commands, refresh the page to reconnect.
+          </p>
+        </div>
+      `;
+    }
+  }
+
+  async setupRealtimeSubscriptions() {
+    if (!this.supabase || !this.isConnected) return;
+
+    try {
+      // Subscribe to employees changes
+      const employeesSubscription = this.supabase
+        .channel('employees-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'employees' },
+          (payload) => this.handleRealtimeUpdate('employees', payload)
+        )
+        .subscribe();
+
+      // Subscribe to attendance changes  
+      const attendanceSubscription = this.supabase
+        .channel('attendance-changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'attendance' },
+          (payload) => this.handleRealtimeUpdate('attendance', payload)
+        )
+        .subscribe();
+
+      // Subscribe to invoices changes
+      const invoicesSubscription = this.supabase
+        .channel('invoices-changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'invoices' },
+          (payload) => this.handleRealtimeUpdate('invoices', payload)
+        )
+        .subscribe();
+
+      this.subscriptions.set('employees', employeesSubscription);
+      this.subscriptions.set('attendance', attendanceSubscription);
+      this.subscriptions.set('invoices', invoicesSubscription);
+
+      console.log('Real-time subscriptions established');
+      this.showSyncIndicators(true);
+
+    } catch (error) {
+      console.error('Error setting up real-time subscriptions:', error);
+    }
+  }
+
+  handleRealtimeUpdate(table, payload) {
+    console.log(`Real-time update for ${table}:`, payload);
+    
+    // Show sync indicators
+    const syncIndicator = document.getElementById(`${table}Sync`);
+    if (syncIndicator) {
+      syncIndicator.classList.add('syncing');
+      setTimeout(() => syncIndicator.classList.remove('syncing'), 1000);
+    }
+
+    // Refresh relevant UI sections
+    switch (table) {
+      case 'employees':
+        if (getCurrentActiveTab() === 'employees') {
+          loadEmployees();
+        }
+        populateEmployeeSelect();
+        updateDashboardStats();
+        break;
+      case 'attendance':
+        if (getCurrentActiveTab() === 'attendance') {
+          loadAttendanceHistory();
+        }
+        updateDashboardStats();
+        break;
+      case 'invoices':
+        updateDashboardStats();
+        break;
+    }
+
+    showNotification(`${table} updated in real-time`, 'info');
+  }
+
+  showSyncIndicators(active) {
+    const indicators = ['attendanceRealtime', 'payrollRealtime', 'settingsRealtime'];
+    indicators.forEach(id => {
+      const indicator = document.getElementById(id);
+      if (indicator) {
+        indicator.style.display = active ? 'flex' : 'none';
+      }
+    });
+  }
+
+  // CRUD operations with fallback to localStorage
+  async getEmployees() {
+    if (!this.isConnected) {
+      return JSON.parse(localStorage.getItem('employees') || '[]');
+    }
+
+    try {
+      const { data, error } = await this.supabase
+        .from('employees')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      // Cache locally
+      localStorage.setItem('employees', JSON.stringify(data));
+      return data;
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      showNotification('Error loading employees from database', 'error');
+      return JSON.parse(localStorage.getItem('employees') || '[]');
+    }
+  }
+
+  async saveEmployee(employee) {
+    // Always save to localStorage first
+    let employees = JSON.parse(localStorage.getItem('employees') || '[]');
+    
+    if (employee.id && employees.find(e => e.id === employee.id)) {
+      // Update existing
+      employees = employees.map(e => e.id === employee.id ? employee : e);
+    } else {
+      // Add new
+      if (!employee.id) {
+        employee.id = this.generateId();
+      }
+      employees.push(employee);
+    }
+    
+    localStorage.setItem('employees', JSON.stringify(employees));
+
+    // Try to save to Supabase if connected
+    if (this.isConnected) {
+      try {
+        const { data, error } = await this.supabase
+          .from('employees')
+          .upsert([employee])
+          .select();
+
+        if (error) throw error;
+        return data[0];
+      } catch (error) {
+        console.error('Error saving employee to database:', error);
+        showNotification('Saved locally - will sync when online', 'warning');
+      }
+    }
+
+    return employee;
+  }
+
+  async deleteEmployee(employeeId) {
+    // Remove from localStorage
+    let employees = JSON.parse(localStorage.getItem('employees') || '[]');
+    employees = employees.filter(e => e.id !== employeeId);
+    localStorage.setItem('employees', JSON.stringify(employees));
+
+    // Try to delete from Supabase if connected
+    if (this.isConnected) {
+      try {
+        const { error } = await this.supabase
+          .from('employees')
+          .delete()
+          .eq('id', employeeId);
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('Error deleting employee from database:', error);
+        showNotification('Deleted locally - will sync when online', 'warning');
+      }
+    }
+  }
+
+  async getAttendance(limit = 30) {
+    if (!this.isConnected) {
+      return JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+    }
+
+    try {
+      const { data, error } = await this.supabase
+        .from('attendance')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+
+      // Cache locally
+      localStorage.setItem('attendanceRecords', JSON.stringify(data));
+      return data;
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      showNotification('Error loading attendance from database', 'error');
+      return JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+    }
+  }
+
+  async saveAttendance(attendance) {
+    // Always save to localStorage first
+    let records = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+    records.unshift(attendance);
+    records = records.slice(0, 30);
+    localStorage.setItem('attendanceRecords', JSON.stringify(records));
+
+    // Try to save to Supabase if connected
+    if (this.isConnected) {
+      try {
+        const { data, error } = await this.supabase
+          .from('attendance')
+          .insert([{
+            ...attendance,
+            id: this.generateId(),
+            employee_id: attendance.employeeId
+          }])
+          .select();
+
+        if (error) throw error;
+        return data[0];
+      } catch (error) {
+        console.error('Error saving attendance to database:', error);
+        showNotification('Attendance saved locally - will sync when online', 'warning');
+      }
+    }
+
+    return attendance;
+  }
+
+  async getClients() {
+    if (!this.isConnected) {
+      return appData.clients; // Use static data as fallback
+    }
+
+    try {
+      const { data, error } = await this.supabase
+        .from('clients')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data.length > 0 ? data : appData.clients;
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+      return appData.clients;
+    }
+  }
+
+  async saveInvoice(invoice) {
+    // Always save to localStorage first
+    let invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+    
+    if (!invoice.id) {
+      invoice.id = this.generateId();
+    }
+    
+    invoices.unshift(invoice);
+    localStorage.setItem('invoices', JSON.stringify(invoices));
+
+    // Try to save to Supabase if connected
+    if (this.isConnected) {
+      try {
+        const { data, error } = await this.supabase
+          .from('invoices')
+          .insert([invoice])
+          .select();
+
+        if (error) throw error;
+        return data[0];
+      } catch (error) {
+        console.error('Error saving invoice to database:', error);
+        showNotification('Invoice saved locally - will sync when online', 'warning');
+      }
+    }
+
+    return invoice;
+  }
+
+  generateId() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  async syncAllData() {
+    if (!this.isConnected) {
+      showNotification('Cannot sync - database not connected', 'error');
+      return;
+    }
+
+    showNotification('Starting data synchronization...', 'info');
+    setButtonLoading('syncAllBtn', true);
+
+    try {
+      // Sync employees
+      const localEmployees = JSON.parse(localStorage.getItem('employees') || '[]');
+      for (const employee of localEmployees) {
+        await this.saveEmployee(employee);
+      }
+
+      // Sync attendance
+      const localAttendance = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+      for (const record of localAttendance) {
+        await this.saveAttendance(record);
+      }
+
+      // Update last sync timestamp
+      localStorage.setItem('lastSync', new Date().toISOString());
+      updateLastSyncDisplay();
+
+      showNotification('Data synchronization completed', 'success');
+    } catch (error) {
+      console.error('Sync error:', error);
+      showNotification('Synchronization failed: ' + error.message, 'error');
+    } finally {
+      setButtonLoading('syncAllBtn', false);
+    }
+  }
+}
+
+// Initialize database service
+const db = new DatabaseService();
 
 // Application data from JSON
 const appData = {
@@ -21,17 +534,17 @@ const appData = {
       "department": "IT",
       "email": "rajesh@rkinfotech.com",
       "phone": "9876543211",
-      "bankAccount": "1234567890123456",
+      "bank_account": "1234567890123456",
       "ifsc": "HDFC0001234",
-      "panNumber": "ABCDE1234F",
-      "basicSalary": 50000,
+      "pan_number": "ABCDE1234F",
+      "basic_salary": 50000,
       "hra": 15000,
       "da": 5000,
-      "medicalAllowance": 2000,
-      "conveyanceAllowance": 1000,
-      "joinDate": "2023-01-15",
+      "medical_allowance": 2000,
+      "conveyance_allowance": 1000,
+      "join_date": "2023-01-15",
       "address": "123 Main Street, Bangalore",
-      "emergencyContact": "9876543299"
+      "emergency_contact": "9876543299"
     },
     {
       "id": "EMP002",
@@ -40,36 +553,17 @@ const appData = {
       "department": "IT",
       "email": "priya@rkinfotech.com",
       "phone": "9876543212",
-      "bankAccount": "2345678901234567",
+      "bank_account": "2345678901234567",
       "ifsc": "HDFC0001234",
-      "panNumber": "BCDEF2345G",
-      "basicSalary": 75000,
+      "pan_number": "BCDEF2345G",
+      "basic_salary": 75000,
       "hra": 22500,
       "da": 7500,
-      "medicalAllowance": 3000,
-      "conveyanceAllowance": 1500,
-      "joinDate": "2022-06-01",
+      "medical_allowance": 3000,
+      "conveyance_allowance": 1500,
+      "join_date": "2022-06-01",
       "address": "456 Park Avenue, Bangalore",
-      "emergencyContact": "9876543298"
-    },
-    {
-      "id": "EMP003",
-      "name": "Amit Singh",
-      "designation": "UI/UX Designer",
-      "department": "Design",
-      "email": "amit@rkinfotech.com",
-      "phone": "9876543213",
-      "bankAccount": "3456789012345678",
-      "ifsc": "HDFC0001234",
-      "panNumber": "CDEFG3456H",
-      "basicSalary": 45000,
-      "hra": 13500,
-      "da": 4500,
-      "medicalAllowance": 2000,
-      "conveyanceAllowance": 1000,
-      "joinDate": "2023-03-20",
-      "address": "789 Garden Road, Bangalore",
-      "emergencyContact": "9876543297"
+      "emergency_contact": "9876543298"
     }
   ],
   "clients": [
@@ -80,7 +574,7 @@ const appData = {
       "phone": "+91-9876543220",
       "email": "info@abctech.com",
       "gst": "27FGHIJ5678K1L9",
-      "contactPerson": "Mr. John Smith"
+      "contact_person": "Mr. John Smith"
     },
     {
       "id": "CLIENT002",
@@ -89,7 +583,7 @@ const appData = {
       "phone": "+91-9876543230",
       "email": "contact@xyzsolutions.com",
       "gst": "07MNOPQ9012R3S4",
-      "contactPerson": "Ms. Sarah Johnson"
+      "contact_person": "Ms. Sarah Johnson"
     }
   ],
   "services": [
@@ -168,9 +662,33 @@ function initializeApp() {
   updateClock();
   setupEventListeners();
   setDefaultDates();
+  updateLastSyncDisplay();
+  
+  // Initialize with sample data if no employees exist
+  initializeDefaultData();
   
   // Update clock every second
   setInterval(updateClock, 1000);
+}
+
+async function initializeDefaultData() {
+  try {
+    const employees = await db.getEmployees();
+    if (employees.length === 0) {
+      // Save default employees to database
+      for (const employee of appData.employees) {
+        await db.saveEmployee(employee);
+      }
+      showNotification('Default data initialized', 'info');
+    }
+  } catch (error) {
+    console.error('Error initializing default data:', error);
+  }
+}
+
+function getCurrentActiveTab() {
+  const activeSection = document.querySelector('.section.active');
+  return activeSection ? activeSection.id : 'dashboard';
 }
 
 function setDefaultDates() {
@@ -381,47 +899,63 @@ function updateAttendanceUI() {
   }
 }
 
-function clockIn() {
-  const now = new Date();
-  attendanceState.isCheckedIn = true;
-  attendanceState.checkInTime = now;
+async function clockIn() {
+  setButtonLoading('clockInBtn', true);
   
-  saveAttendanceState();
-  updateAttendanceUI();
-  
-  showNotification('Clocked in successfully at ' + now.toLocaleTimeString('en-IN', {hour12: true}));
+  try {
+    const now = new Date();
+    attendanceState.isCheckedIn = true;
+    attendanceState.checkInTime = now;
+    
+    saveAttendanceState();
+    updateAttendanceUI();
+    
+    showNotification('Clocked in successfully at ' + now.toLocaleTimeString('en-IN', {hour12: true}));
+  } catch (error) {
+    showNotification('Error clocking in: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('clockInBtn', false);
+  }
 }
 
-function clockOut() {
-  const now = new Date();
-  const checkOutTime = now;
-  const totalHours = calculateHoursWorked(attendanceState.checkInTime, checkOutTime);
+async function clockOut() {
+  setButtonLoading('clockOutBtn', true);
   
-  const attendanceRecord = {
-    date: now.toISOString().split('T')[0],
-    employeeId: currentUser.id,
-    checkIn: attendanceState.checkInTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
-    checkOut: checkOutTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
-    totalHours: totalHours,
-    location: 'Office'
-  };
-  
-  saveAttendanceRecord(attendanceRecord);
-  
-  attendanceState.isCheckedIn = false;
-  attendanceState.checkInTime = null;
-  attendanceState.todayHours = 0;
-  
-  saveAttendanceState();
-  updateAttendanceUI();
-  loadAttendanceHistory();
-  
-  const todayHoursElement = document.getElementById('todayHours');
-  if (todayHoursElement) {
-    todayHoursElement.textContent = '0:00';
+  try {
+    const now = new Date();
+    const checkOutTime = now;
+    const totalHours = calculateHoursWorked(attendanceState.checkInTime, checkOutTime);
+    
+    const attendanceRecord = {
+      date: now.toISOString().split('T')[0],
+      employeeId: currentUser.id,
+      checkIn: attendanceState.checkInTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
+      checkOut: checkOutTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
+      totalHours: totalHours,
+      location: 'Office'
+    };
+    
+    await db.saveAttendance(attendanceRecord);
+    
+    attendanceState.isCheckedIn = false;
+    attendanceState.checkInTime = null;
+    attendanceState.todayHours = 0;
+    
+    saveAttendanceState();
+    updateAttendanceUI();
+    loadAttendanceHistory();
+    
+    const todayHoursElement = document.getElementById('todayHours');
+    if (todayHoursElement) {
+      todayHoursElement.textContent = '0:00';
+    }
+    
+    showNotification('Clocked out successfully. Total hours: ' + totalHours);
+  } catch (error) {
+    showNotification('Error clocking out: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('clockOutBtn', false);
   }
-  
-  showNotification('Clocked out successfully. Total hours: ' + totalHours);
 }
 
 function saveAttendanceState() {
@@ -431,52 +965,82 @@ function saveAttendanceState() {
   }));
 }
 
-function saveAttendanceRecord(record) {
-  let records = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
-  records.unshift(record);
-  records = records.slice(0, 30);
-  localStorage.setItem('attendanceRecords', JSON.stringify(records));
-}
-
-function loadAttendanceHistory() {
-  const records = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+async function loadAttendanceHistory() {
   const historyList = document.getElementById('attendanceHistoryList');
   
   if (!historyList) return;
   
-  if (records.length === 0) {
-    historyList.innerHTML = '<div class="table-row"><span colspan="4" style="grid-column: 1 / -1; text-align: center; color: var(--color-text-secondary);">No attendance records found</span></div>';
-    return;
+  try {
+    const records = await db.getAttendance();
+    
+    if (records.length === 0) {
+      historyList.innerHTML = '<div class="table-row"><span style="grid-column: 1 / -1; text-align: center; color: var(--color-text-secondary);">No attendance records found</span></div>';
+      return;
+    }
+    
+    historyList.innerHTML = records.map(record => `
+      <div class="table-row">
+        <span>${new Date(record.date).toLocaleDateString('en-IN')}</span>
+        <span>${record.checkIn || record.check_in}</span>
+        <span>${record.checkOut || record.check_out}</span>
+        <span>${record.totalHours || record.total_hours}</span>
+      </div>
+    `).join('');
+  } catch (error) {
+    console.error('Error loading attendance history:', error);
+    historyList.innerHTML = '<div class="table-row"><span style="grid-column: 1 / -1; text-align: center; color: var(--color-error);">Error loading attendance records</span></div>';
   }
-  
-  historyList.innerHTML = records.map(record => `
-    <div class="table-row">
-      <span>${new Date(record.date).toLocaleDateString('en-IN')}</span>
-      <span>${record.checkIn}</span>
-      <span>${record.checkOut}</span>
-      <span>${record.totalHours}</span>
-    </div>
-  `).join('');
+}
+
+async function refreshAttendanceHistory() {
+  setButtonLoading('refreshAttendanceBtn', true);
+  try {
+    await loadAttendanceHistory();
+    showNotification('Attendance history refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing attendance: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshAttendanceBtn', false);
+  }
 }
 
 // Employee Management Functions
-function loadEmployees() {
-  const employees = getEmployees();
+async function loadEmployees() {
   const employeeList = document.getElementById('employeeList');
   
   if (!employeeList) return;
   
-  if (employees.length === 0) {
-    employeeList.innerHTML = '<div class="employee-card"><p>No employees found. Click "Add New Employee" to get started.</p></div>';
-    return;
+  try {
+    const employees = await db.getEmployees();
+    
+    if (employees.length === 0) {
+      employeeList.innerHTML = '<div class="employee-card"><p>No employees found. Click "Add New Employee" to get started.</p></div>';
+      return;
+    }
+    
+    employeeList.innerHTML = employees.map(employee => createEmployeeCard(employee)).join('');
+    
+    // Update total employees count
+    const totalEmployeesElement = document.getElementById('totalEmployees');
+    if (totalEmployeesElement) {
+      totalEmployeesElement.innerHTML = employees.length;
+    }
+  } catch (error) {
+    console.error('Error loading employees:', error);
+    employeeList.innerHTML = '<div class="employee-card"><p class="text-error">Error loading employees</p></div>';
   }
-  
-  employeeList.innerHTML = employees.map(employee => createEmployeeCard(employee)).join('');
-  
-  // Update total employees count
-  const totalEmployeesElement = document.getElementById('totalEmployees');
-  if (totalEmployeesElement) {
-    totalEmployeesElement.textContent = employees.length;
+}
+
+async function refreshEmployees() {
+  setButtonLoading('refreshEmployeesBtn', true);
+  try {
+    await loadEmployees();
+    await populateEmployeeSelect();
+    showNotification('Employees refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing employees: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshEmployeesBtn', false);
   }
 }
 
@@ -515,18 +1079,18 @@ function createEmployeeCard(employee) {
           </div>
           <div class="detail-item">
             <span class="detail-label">Join Date:</span>
-            <span class="detail-value">${employee.joinDate ? new Date(employee.joinDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+            <span class="detail-value">${employee.join_date || employee.joinDate ? new Date(employee.join_date || employee.joinDate).toLocaleDateString('en-IN') : 'N/A'}</span>
           </div>
         </div>
         <div class="detail-group">
           <h5>Salary Information</h5>
           <div class="detail-item">
             <span class="detail-label">Basic Salary:</span>
-            <span class="detail-value">₹${employee.basicSalary?.toLocaleString('en-IN') || '0'}</span>
+            <span class="detail-value">₹${(employee.basic_salary || employee.basicSalary || 0).toLocaleString('en-IN')}</span>
           </div>
           <div class="detail-item">
             <span class="detail-label">Total CTC:</span>
-            <span class="detail-value">₹${((employee.basicSalary || 0) + (employee.hra || 0) + (employee.da || 0) + (employee.medicalAllowance || 0) + (employee.conveyanceAllowance || 0)).toLocaleString('en-IN')}</span>
+            <span class="detail-value">₹${((employee.basic_salary || employee.basicSalary || 0) + (employee.hra || 0) + (employee.da || 0) + (employee.medical_allowance || employee.medicalAllowance || 0) + (employee.conveyance_allowance || employee.conveyanceAllowance || 0)).toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>
@@ -546,104 +1110,108 @@ function showAddEmployeeModal() {
   document.getElementById('employeeModal').classList.remove('hidden');
 }
 
-function editEmployee(employeeId) {
-  const employees = getEmployees();
-  const employee = employees.find(emp => emp.id === employeeId);
-  
-  if (!employee) return;
-  
-  editingEmployeeId = employeeId;
-  document.getElementById('employeeModalTitle').textContent = 'Edit Employee';
-  
-  // Populate form with employee data
-  document.getElementById('empId').value = employee.id;
-  document.getElementById('empName').value = employee.name;
-  document.getElementById('empDesignation').value = employee.designation;
-  document.getElementById('empDepartment').value = employee.department;
-  document.getElementById('empEmail').value = employee.email;
-  document.getElementById('empPhone').value = employee.phone;
-  document.getElementById('empBankAccount').value = employee.bankAccount || '';
-  document.getElementById('empIfsc').value = employee.ifsc || '';
-  document.getElementById('empPan').value = employee.panNumber || '';
-  document.getElementById('empJoinDate').value = employee.joinDate || '';
-  document.getElementById('empBasicSalary').value = employee.basicSalary || '';
-  document.getElementById('empHra').value = employee.hra || '';
-  document.getElementById('empDa').value = employee.da || '';
-  document.getElementById('empMedical').value = employee.medicalAllowance || '';
-  document.getElementById('empConveyance').value = employee.conveyanceAllowance || '';
-  document.getElementById('empAddress').value = employee.address || '';
-  
-  document.getElementById('employeeModal').classList.remove('hidden');
+async function editEmployee(employeeId) {
+  try {
+    const employees = await db.getEmployees();
+    const employee = employees.find(emp => emp.id === employeeId);
+    
+    if (!employee) return;
+    
+    editingEmployeeId = employeeId;
+    document.getElementById('employeeModalTitle').textContent = 'Edit Employee';
+    
+    // Populate form with employee data
+    document.getElementById('empId').value = employee.id;
+    document.getElementById('empName').value = employee.name;
+    document.getElementById('empDesignation').value = employee.designation;
+    document.getElementById('empDepartment').value = employee.department;
+    document.getElementById('empEmail').value = employee.email;
+    document.getElementById('empPhone').value = employee.phone;
+    document.getElementById('empBankAccount').value = employee.bank_account || employee.bankAccount || '';
+    document.getElementById('empIfsc').value = employee.ifsc || '';
+    document.getElementById('empPan').value = employee.pan_number || employee.panNumber || '';
+    document.getElementById('empJoinDate').value = employee.join_date || employee.joinDate || '';
+    document.getElementById('empBasicSalary').value = employee.basic_salary || employee.basicSalary || '';
+    document.getElementById('empHra').value = employee.hra || '';
+    document.getElementById('empDa').value = employee.da || '';
+    document.getElementById('empMedical').value = employee.medical_allowance || employee.medicalAllowance || '';
+    document.getElementById('empConveyance').value = employee.conveyance_allowance || employee.conveyanceAllowance || '';
+    document.getElementById('empAddress').value = employee.address || '';
+    document.getElementById('empEmergencyContact').value = employee.emergency_contact || employee.emergencyContact || '';
+    
+    document.getElementById('employeeModal').classList.remove('hidden');
+  } catch (error) {
+    showNotification('Error loading employee details: ' + error.message, 'error');
+  }
 }
 
-function saveEmployee() {
+async function saveEmployee() {
   const form = document.getElementById('employeeForm');
   if (!form.checkValidity()) {
     form.reportValidity();
     return;
   }
   
-  const employeeData = {
-    id: document.getElementById('empId').value,
-    name: document.getElementById('empName').value,
-    designation: document.getElementById('empDesignation').value,
-    department: document.getElementById('empDepartment').value,
-    email: document.getElementById('empEmail').value,
-    phone: document.getElementById('empPhone').value,
-    bankAccount: document.getElementById('empBankAccount').value,
-    ifsc: document.getElementById('empIfsc').value,
-    panNumber: document.getElementById('empPan').value,
-    joinDate: document.getElementById('empJoinDate').value,
-    basicSalary: parseFloat(document.getElementById('empBasicSalary').value) || 0,
-    hra: parseFloat(document.getElementById('empHra').value) || 0,
-    da: parseFloat(document.getElementById('empDa').value) || 0,
-    medicalAllowance: parseFloat(document.getElementById('empMedical').value) || 0,
-    conveyanceAllowance: parseFloat(document.getElementById('empConveyance').value) || 0,
-    address: document.getElementById('empAddress').value
-  };
+  setButtonLoading('saveEmployeeBtn', true);
   
-  let employees = getEmployees();
-  
-  if (editingEmployeeId) {
-    // Update existing employee
-    const index = employees.findIndex(emp => emp.id === editingEmployeeId);
-    if (index !== -1) {
-      employees[index] = employeeData;
-      showNotification('Employee updated successfully');
-    }
-  } else {
-    // Add new employee
-    employees.push(employeeData);
-    showNotification('Employee added successfully');
+  try {
+    const employeeData = {
+      id: document.getElementById('empId').value,
+      name: document.getElementById('empName').value,
+      designation: document.getElementById('empDesignation').value,
+      department: document.getElementById('empDepartment').value,
+      email: document.getElementById('empEmail').value,
+      phone: document.getElementById('empPhone').value,
+      bank_account: document.getElementById('empBankAccount').value,
+      ifsc: document.getElementById('empIfsc').value,
+      pan_number: document.getElementById('empPan').value,
+      join_date: document.getElementById('empJoinDate').value,
+      basic_salary: parseFloat(document.getElementById('empBasicSalary').value) || 0,
+      hra: parseFloat(document.getElementById('empHra').value) || 0,
+      da: parseFloat(document.getElementById('empDa').value) || 0,
+      medical_allowance: parseFloat(document.getElementById('empMedical').value) || 0,
+      conveyance_allowance: parseFloat(document.getElementById('empConveyance').value) || 0,
+      address: document.getElementById('empAddress').value,
+      emergency_contact: document.getElementById('empEmergencyContact').value
+    };
+    
+    await db.saveEmployee(employeeData);
+    
+    closeModal('employeeModal');
+    loadEmployees();
+    populateEmployeeSelect();
+    
+    showNotification(editingEmployeeId ? 'Employee updated successfully' : 'Employee added successfully');
+  } catch (error) {
+    showNotification('Error saving employee: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('saveEmployeeBtn', false);
   }
-  
-  saveEmployees(employees);
-  closeModal('employeeModal');
-  loadEmployees();
-  populateEmployeeSelect();
 }
 
 function confirmDeleteEmployee(employeeId) {
-  const employees = getEmployees();
-  const employee = employees.find(emp => emp.id === employeeId);
-  
-  if (!employee) return;
-  
-  showConfirmModal(
-    'Delete Employee',
-    `Are you sure you want to delete ${employee.name}? This action cannot be undone.`,
-    () => deleteEmployee(employeeId)
-  );
+  db.getEmployees().then(employees => {
+    const employee = employees.find(emp => emp.id === employeeId);
+    
+    if (!employee) return;
+    
+    showConfirmModal(
+      'Delete Employee',
+      `Are you sure you want to delete ${employee.name}? This action cannot be undone.`,
+      () => deleteEmployee(employeeId)
+    );
+  });
 }
 
-function deleteEmployee(employeeId) {
-  let employees = getEmployees();
-  employees = employees.filter(emp => emp.id !== employeeId);
-  
-  saveEmployees(employees);
-  loadEmployees();
-  populateEmployeeSelect();
-  showNotification('Employee deleted successfully');
+async function deleteEmployee(employeeId) {
+  try {
+    await db.deleteEmployee(employeeId);
+    loadEmployees();
+    populateEmployeeSelect();
+    showNotification('Employee deleted successfully');
+  } catch (error) {
+    showNotification('Error deleting employee: ' + error.message, 'error');
+  }
 }
 
 function filterEmployees() {
@@ -653,9 +1221,9 @@ function filterEmployees() {
   const employeeCards = document.querySelectorAll('.employee-card');
   
   employeeCards.forEach(card => {
-    const name = card.querySelector('h4').textContent.toLowerCase();
-    const designation = card.querySelector('p').textContent.toLowerCase();
-    const department = card.querySelector('p').textContent.split('•')[1]?.trim();
+    const name = card.querySelector('h4')?.textContent.toLowerCase() || '';
+    const designation = card.querySelector('p')?.textContent.toLowerCase() || '';
+    const department = card.querySelector('p')?.textContent.split('•')[1]?.trim();
     
     const matchesSearch = name.includes(searchTerm) || designation.includes(searchTerm);
     const matchesDepartment = !departmentFilter || department === departmentFilter;
@@ -669,101 +1237,135 @@ function filterEmployees() {
 }
 
 function generateEmployeeId() {
-  const employees = getEmployees();
-  const lastId = employees.length > 0 ? 
-    Math.max(...employees.map(emp => parseInt(emp.id.replace('EMP', '')))) : 0;
-  return 'EMP' + String(lastId + 1).padStart(3, '0');
-}
-
-function getEmployees() {
-  const stored = localStorage.getItem('employees');
-  return stored ? JSON.parse(stored) : appData.employees;
-}
-
-function saveEmployees(employees) {
-  localStorage.setItem('employees', JSON.stringify(employees));
+  return 'EMP' + String(Date.now()).slice(-6);
 }
 
 // Employee and dropdown functions
-function populateEmployeeSelect() {
+async function populateEmployeeSelect() {
   const select = document.getElementById('employeeSelect');
   if (!select) return;
   
-  select.innerHTML = '<option value="">Select Employee</option>';
-  
-  const employees = getEmployees();
-  employees.forEach(employee => {
-    const option = document.createElement('option');
-    option.value = employee.id;
-    option.textContent = `${employee.name} (${employee.id})`;
-    select.appendChild(option);
-  });
-}
-
-function loadEmployeeDetails() {
-  const employeeSelect = document.getElementById('employeeSelect');
-  const employeeId = employeeSelect.value;
-  const employees = getEmployees();
-  const employee = employees.find(emp => emp.id === employeeId);
-  
-  if (employee) {
-    document.getElementById('employeeId').value = employee.id;
-    document.getElementById('designation').value = employee.designation;
-    document.getElementById('basicSalary').value = employee.basicSalary || 0;
-    document.getElementById('hra').value = employee.hra || 0;
-    document.getElementById('da').value = employee.da || 0;
-    document.getElementById('medicalAllowance').value = employee.medicalAllowance || 0;
-    document.getElementById('conveyanceAllowance').value = employee.conveyanceAllowance || 0;
+  try {
+    const employees = await db.getEmployees();
     
-    // Calculate deductions
-    const basicSalary = employee.basicSalary || 0;
-    const grossForPF = basicSalary + (employee.hra || 0);
+    select.innerHTML = '<option value="">Select Employee</option>';
     
-    document.getElementById('pf').value = Math.round(basicSalary * (appData.deductions.pfRate / 100));
-    document.getElementById('esi').value = Math.round(grossForPF * (appData.deductions.esiRate / 100));
-    document.getElementById('professionalTax').value = appData.deductions.professionalTax;
-    document.getElementById('incomeTax').value = Math.round(basicSalary * (appData.deductions.incomeTaxRate / 100));
-    
-    calculateSalary();
-  } else {
-    // Clear fields if no employee selected
-    const fields = ['employeeId', 'designation', 'basicSalary', 'hra', 'da', 'medicalAllowance', 'conveyanceAllowance', 'pf', 'esi', 'professionalTax', 'incomeTax'];
-    fields.forEach(fieldId => {
-      const field = document.getElementById(fieldId);
-      if (field) field.value = '';
+    employees.forEach(employee => {
+      const option = document.createElement('option');
+      option.value = employee.id;
+      option.textContent = `${employee.name} (${employee.id})`;
+      select.appendChild(option);
     });
-    calculateSalary();
+  } catch (error) {
+    select.innerHTML = '<option value="">Error loading employees</option>';
   }
 }
 
-function populateClientSelect() {
+async function loadEmployeeDetails() {
+  const employeeSelect = document.getElementById('employeeSelect');
+  const employeeId = employeeSelect.value;
+  
+  try {
+    const employees = await db.getEmployees();
+    const employee = employees.find(emp => emp.id === employeeId);
+    
+    if (employee) {
+      document.getElementById('employeeId').value = employee.id;
+      document.getElementById('designation').value = employee.designation;
+      document.getElementById('basicSalary').value = employee.basic_salary || employee.basicSalary || 0;
+      document.getElementById('hra').value = employee.hra || 0;
+      document.getElementById('da').value = employee.da || 0;
+      document.getElementById('medicalAllowance').value = employee.medical_allowance || employee.medicalAllowance || 0;
+      document.getElementById('conveyanceAllowance').value = employee.conveyance_allowance || employee.conveyanceAllowance || 0;
+      
+      // Calculate deductions
+      const basicSalary = employee.basic_salary || employee.basicSalary || 0;
+      const grossForPF = basicSalary + (employee.hra || 0);
+      
+      document.getElementById('pf').value = Math.round(basicSalary * (appData.deductions.pfRate / 100));
+      document.getElementById('esi').value = Math.round(grossForPF * (appData.deductions.esiRate / 100));
+      document.getElementById('professionalTax').value = appData.deductions.professionalTax;
+      document.getElementById('incomeTax').value = Math.round(basicSalary * (appData.deductions.incomeTaxRate / 100));
+      
+      calculateSalary();
+    } else {
+      // Clear fields if no employee selected
+      const fields = ['employeeId', 'designation', 'basicSalary', 'hra', 'da', 'medicalAllowance', 'conveyanceAllowance', 'pf', 'esi', 'professionalTax', 'incomeTax'];
+      fields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) field.value = '';
+      });
+      calculateSalary();
+    }
+  } catch (error) {
+    showNotification('Error loading employee details: ' + error.message, 'error');
+  }
+}
+
+async function populateClientSelect() {
   const select = document.getElementById('clientSelect');
   if (!select) return;
   
-  select.innerHTML = '<option value="">Select Client</option>';
-  
-  appData.clients.forEach(client => {
-    const option = document.createElement('option');
-    option.value = client.id;
-    option.textContent = client.name;
-    select.appendChild(option);
-  });
+  try {
+    const clients = await db.getClients();
+    
+    select.innerHTML = '<option value="">Select Client</option>';
+    
+    clients.forEach(client => {
+      const option = document.createElement('option');
+      option.value = client.id;
+      option.textContent = client.name;
+      select.appendChild(option);
+    });
+  } catch (error) {
+    select.innerHTML = '<option value="">Error loading clients</option>';
+  }
 }
 
-function loadClientDetails() {
+async function loadClientDetails() {
   const clientSelect = document.getElementById('clientSelect');
   const clientId = clientSelect.value;
-  const client = appData.clients.find(c => c.id === clientId);
   
-  if (client) {
-    document.getElementById('clientName').value = client.name;
-    document.getElementById('clientGst').value = client.gst;
-    document.getElementById('clientAddress').value = client.address;
-  } else {
-    // Clear fields if no client selected
-    document.getElementById('clientName').value = '';
-    document.getElementById('clientGst').value = '';
-    document.getElementById('clientAddress').value = '';
+  try {
+    const clients = await db.getClients();
+    const client = clients.find(c => c.id === clientId);
+    
+    if (client) {
+      document.getElementById('clientName').value = client.name;
+      document.getElementById('clientGst').value = client.gst;
+      document.getElementById('clientAddress').value = client.address;
+    } else {
+      // Clear fields if no client selected
+      document.getElementById('clientName').value = '';
+      document.getElementById('clientGst').value = '';
+      document.getElementById('clientAddress').value = '';
+    }
+  } catch (error) {
+    showNotification('Error loading client details: ' + error.message, 'error');
+  }
+}
+
+async function refreshClients() {
+  setButtonLoading('refreshClientsBtn', true);
+  try {
+    await populateClientSelect();
+    showNotification('Clients refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing clients: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshClientsBtn', false);
+  }
+}
+
+async function refreshInvoices() {
+  setButtonLoading('refreshInvoicesBtn', true);
+  try {
+    await updateDashboardStats();
+    showNotification('Invoices refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing invoices: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshInvoicesBtn', false);
   }
 }
 
@@ -825,40 +1427,44 @@ function calculateSalary() {
   if (netElement) netElement.textContent = `₹${netSalary.toLocaleString('en-IN')}`;
 }
 
-function previewSalarySlip() {
+async function previewSalarySlip() {
   const employeeId = document.getElementById('employeeSelect').value;
   if (!employeeId) {
     showNotification('Please select an employee', 'error');
     return;
   }
   
-  const employees = getEmployees();
-  const employee = employees.find(emp => emp.id === employeeId);
-  const salaryPeriod = document.getElementById('salaryPeriod').value;
-  
-  currentSalaryData = {
-    employee: employee,
-    period: salaryPeriod,
-    basicSalary: parseFloat(document.getElementById('basicSalary').value),
-    hra: parseFloat(document.getElementById('hra').value),
-    da: parseFloat(document.getElementById('da').value),
-    medicalAllowance: parseFloat(document.getElementById('medicalAllowance').value),
-    conveyanceAllowance: parseFloat(document.getElementById('conveyanceAllowance').value),
-    pf: parseFloat(document.getElementById('pf').value),
-    esi: parseFloat(document.getElementById('esi').value),
-    professionalTax: parseFloat(document.getElementById('professionalTax').value),
-    incomeTax: parseFloat(document.getElementById('incomeTax').value)
-  };
-  
-  const grossSalary = currentSalaryData.basicSalary + currentSalaryData.hra + currentSalaryData.da + 
-    currentSalaryData.medicalAllowance + currentSalaryData.conveyanceAllowance;
-  const totalDeductions = currentSalaryData.pf + currentSalaryData.esi + currentSalaryData.professionalTax + currentSalaryData.incomeTax;
-  const netSalary = grossSalary - totalDeductions;
-  
-  const salarySlipHTML = generateSalarySlipHTML(currentSalaryData, grossSalary, totalDeductions, netSalary);
-  
-  showDocumentPreview('Salary Slip Preview', salarySlipHTML);
-  document.getElementById('downloadSalaryBtn').disabled = false;
+  try {
+    const employees = await db.getEmployees();
+    const employee = employees.find(emp => emp.id === employeeId);
+    const salaryPeriod = document.getElementById('salaryPeriod').value;
+    
+    currentSalaryData = {
+      employee: employee,
+      period: salaryPeriod,
+      basicSalary: parseFloat(document.getElementById('basicSalary').value),
+      hra: parseFloat(document.getElementById('hra').value),
+      da: parseFloat(document.getElementById('da').value),
+      medicalAllowance: parseFloat(document.getElementById('medicalAllowance').value),
+      conveyanceAllowance: parseFloat(document.getElementById('conveyanceAllowance').value),
+      pf: parseFloat(document.getElementById('pf').value),
+      esi: parseFloat(document.getElementById('esi').value),
+      professionalTax: parseFloat(document.getElementById('professionalTax').value),
+      incomeTax: parseFloat(document.getElementById('incomeTax').value)
+    };
+    
+    const grossSalary = currentSalaryData.basicSalary + currentSalaryData.hra + currentSalaryData.da + 
+      currentSalaryData.medicalAllowance + currentSalaryData.conveyanceAllowance;
+    const totalDeductions = currentSalaryData.pf + currentSalaryData.esi + currentSalaryData.professionalTax + currentSalaryData.incomeTax;
+    const netSalary = grossSalary - totalDeductions;
+    
+    const salarySlipHTML = generateSalarySlipHTML(currentSalaryData, grossSalary, totalDeductions, netSalary);
+    
+    showDocumentPreview('Salary Slip Preview', salarySlipHTML);
+    document.getElementById('downloadSalaryBtn').disabled = false;
+  } catch (error) {
+    showNotification('Error previewing salary slip: ' + error.message, 'error');
+  }
 }
 
 function downloadSalaryPDF() {
@@ -867,7 +1473,7 @@ function downloadSalaryPDF() {
     return;
   }
   
-  showLoading();
+  showLoading('Generating salary slip PDF...');
   
   setTimeout(() => {
     try {
@@ -898,7 +1504,7 @@ function downloadSalaryPDF() {
       const empDetails = [
         ['Employee ID', currentSalaryData.employee.id, 'Name', currentSalaryData.employee.name],
         ['Designation', currentSalaryData.employee.designation, 'Department', currentSalaryData.employee.department],
-        ['PAN Number', currentSalaryData.employee.panNumber || 'N/A', 'Bank A/C', currentSalaryData.employee.bankAccount || 'N/A']
+        ['PAN Number', currentSalaryData.employee.pan_number || currentSalaryData.employee.panNumber || 'N/A', 'Bank A/C', currentSalaryData.employee.bank_account || currentSalaryData.employee.bankAccount || 'N/A']
       ];
       
       doc.autoTable({
@@ -990,8 +1596,8 @@ function generateSalarySlipHTML(data, gross, deductions, net) {
           <tr><td><strong>Name:</strong></td><td>${data.employee.name}</td></tr>
           <tr><td><strong>Designation:</strong></td><td>${data.employee.designation}</td></tr>
           <tr><td><strong>Department:</strong></td><td>${data.employee.department}</td></tr>
-          <tr><td><strong>PAN:</strong></td><td>${data.employee.panNumber || 'N/A'}</td></tr>
-          <tr><td><strong>Bank A/C:</strong></td><td>${data.employee.bankAccount || 'N/A'}</td></tr>
+          <tr><td><strong>PAN:</strong></td><td>${data.employee.pan_number || data.employee.panNumber || 'N/A'}</td></tr>
+          <tr><td><strong>Bank A/C:</strong></td><td>${data.employee.bank_account || data.employee.bankAccount || 'N/A'}</td></tr>
         </table>
       </div>
       
@@ -1180,13 +1786,41 @@ function previewInvoice() {
   document.getElementById('downloadInvoiceBtn').disabled = false;
 }
 
+async function saveInvoice() {
+  if (!currentInvoiceData) {
+    previewInvoice();
+    if (!currentInvoiceData) return;
+  }
+  
+  setButtonLoading('saveInvoiceBtn', true);
+  
+  try {
+    await db.saveInvoice({
+      ...currentInvoiceData,
+      status: 'saved',
+      created_at: new Date().toISOString()
+    });
+    
+    showNotification('Invoice saved successfully');
+    
+    // Reset form
+    document.getElementById('invoiceNumber').value = 'INV-' + Date.now();
+    setDefaultDates();
+    
+  } catch (error) {
+    showNotification('Error saving invoice: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('saveInvoiceBtn', false);
+  }
+}
+
 function downloadInvoicePDF() {
   if (!currentInvoiceData) {
     showNotification('Please preview the invoice first', 'error');
     return;
   }
   
-  showLoading();
+  showLoading('Generating invoice PDF...');
   
   setTimeout(() => {
     try {
@@ -1395,52 +2029,121 @@ function uploadLogo() {
       document.getElementById('companyLogo').src = e.target.result;
       
       localStorage.setItem('companyLogo', e.target.result);
+      showNotification('Logo uploaded successfully');
     };
     reader.readAsDataURL(file);
   }
 }
 
-function saveSettings() {
-  const settings = {
-    companyName: document.getElementById('companyName').value,
-    companyGst: document.getElementById('companyGst').value,
-    companyAddress: document.getElementById('companyAddress').value,
-    invoiceTemplate: document.getElementById('invoiceTemplate').value,
-    salaryTemplate: document.getElementById('salaryTemplate').value
-  };
+async function saveSettings() {
+  setButtonLoading('saveSettingsBtn', true);
   
-  localStorage.setItem('companySettings', JSON.stringify(settings));
-  showNotification('Settings saved successfully');
+  try {
+    const settings = {
+      companyName: document.getElementById('companyName').value,
+      companyGst: document.getElementById('companyGst').value,
+      companyAddress: document.getElementById('companyAddress').value,
+      invoiceTemplate: document.getElementById('invoiceTemplate')?.value || 'template1',
+      salaryTemplate: document.getElementById('salaryTemplate')?.value || 'salary1'
+    };
+    
+    localStorage.setItem('companySettings', JSON.stringify(settings));
+    
+    // Update company name in header
+    const companyNameElement = document.querySelector('.company-name');
+    if (companyNameElement) {
+      companyNameElement.textContent = settings.companyName;
+    }
+    
+    showNotification('Settings saved successfully');
+  } catch (error) {
+    showNotification('Error saving settings: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('saveSettingsBtn', false);
+  }
+}
+
+async function syncAllData() {
+  await db.syncAllData();
 }
 
 function exportData() {
-  const data = {
-    attendance: JSON.parse(localStorage.getItem('attendanceRecords') || '[]'),
-    employees: JSON.parse(localStorage.getItem('employees') || '[]'),
-    settings: JSON.parse(localStorage.getItem('companySettings') || '{}'),
-    exportDate: new Date().toISOString()
-  };
-  
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `rk-infotech-data-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  
-  showNotification('Data exported successfully');
+  try {
+    const data = {
+      attendance: JSON.parse(localStorage.getItem('attendanceRecords') || '[]'),
+      employees: JSON.parse(localStorage.getItem('employees') || '[]'),
+      invoices: JSON.parse(localStorage.getItem('invoices') || '[]'),
+      settings: JSON.parse(localStorage.getItem('companySettings') || '{}'),
+      exportDate: new Date().toISOString(),
+      version: '1.0'
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rk-infotech-data-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    showNotification('Data exported successfully');
+  } catch (error) {
+    showNotification('Error exporting data: ' + error.message, 'error');
+  }
 }
 
-function clearData() {
+function clearLocalData() {
   showConfirmModal(
-    'Clear All Data',
-    'Are you sure you want to clear all data? This action cannot be undone.',
+    'Clear Local Cache',
+    'Are you sure you want to clear all local data cache? This will not affect data in the cloud database.',
     () => {
-      localStorage.clear();
+      const keysToKeep = ['companyLogo', 'companySettings'];
+      const allKeys = Object.keys(localStorage);
+      
+      allKeys.forEach(key => {
+        if (!keysToKeep.includes(key)) {
+          localStorage.removeItem(key);
+        }
+      });
+      
+      showNotification('Local cache cleared successfully');
       location.reload();
     }
   );
+}
+
+function resetDatabase() {
+  showConfirmModal(
+    'Reset Database',
+    'Are you sure you want to reset the entire database? This will permanently delete all data and cannot be undone.',
+    async () => {
+      if (!db.isConnected) {
+        showNotification('Database not connected', 'error');
+        return;
+      }
+
+      try {
+        // This would require database admin permissions
+        showNotification('Database reset requires manual action in Supabase dashboard', 'warning');
+      } catch (error) {
+        showNotification('Error resetting database: ' + error.message, 'error');
+      }
+    }
+  );
+}
+
+function updateLastSyncDisplay() {
+  const lastSync = localStorage.getItem('lastSync');
+  const lastSyncElement = document.getElementById('lastSync');
+  
+  if (lastSyncElement) {
+    if (lastSync) {
+      const syncDate = new Date(lastSync);
+      lastSyncElement.textContent = syncDate.toLocaleString('en-IN');
+    } else {
+      lastSyncElement.textContent = 'Never';
+    }
+  }
 }
 
 // Modal functions
@@ -1464,7 +2167,8 @@ function showConfirmModal(title, message, onConfirm) {
   document.getElementById('confirmModal').classList.remove('hidden');
 }
 
-function showLoading() {
+function showLoading(message = 'Processing...') {
+  document.getElementById('loadingMessage').textContent = message;
   document.getElementById('loadingModal').classList.remove('hidden');
 }
 
@@ -1502,11 +2206,14 @@ function printDocument() {
 
 // Utility functions
 function showNotification(message, type = 'success') {
+  const container = document.getElementById('notificationContainer');
+  if (!container) return;
+
   const notification = document.createElement('div');
   notification.className = `notification ${type}`;
   notification.textContent = message;
   
-  document.body.appendChild(notification);
+  container.appendChild(notification);
   
   setTimeout(() => {
     notification.classList.add('show');
@@ -1515,32 +2222,76 @@ function showNotification(message, type = 'success') {
   setTimeout(() => {
     notification.classList.remove('show');
     setTimeout(() => {
-      if (document.body.contains(notification)) {
-        document.body.removeChild(notification);
+      if (container.contains(notification)) {
+        container.removeChild(notification);
       }
     }, 300);
-  }, 3000);
+  }, type === 'error' ? 5000 : 3000);
 }
 
-function updateDashboardStats() {
-  const records = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
-  const thisMonth = records.filter(record => {
-    const recordDate = new Date(record.date);
-    const now = new Date();
-    return recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear();
-  });
-  
-  const presentDaysElement = document.getElementById('presentDays');
-  const absentDaysElement = document.getElementById('absentDays');
-  const monthlyHoursElement = document.getElementById('monthlyHours');
-  
-  if (presentDaysElement) presentDaysElement.textContent = thisMonth.length;
-  if (absentDaysElement) absentDaysElement.textContent = Math.max(0, 22 - thisMonth.length);
-  
-  const totalHours = thisMonth.reduce((sum, record) => {
-    const [hours, minutes] = record.totalHours.split(':').map(Number);
-    return sum + hours + (minutes / 60);
-  }, 0);
-  
-  if (monthlyHoursElement) monthlyHoursElement.textContent = Math.round(totalHours);
+function setButtonLoading(buttonId, loading) {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+
+  const spinner = button.querySelector('.loading-spinner');
+  if (loading) {
+    button.disabled = true;
+    button.classList.add('loading');
+    if (spinner) spinner.classList.remove('hidden');
+  } else {
+    button.disabled = false;
+    button.classList.remove('loading');
+    if (spinner) spinner.classList.add('hidden');
+  }
 }
+
+async function updateDashboardStats() {
+  try {
+    // Update attendance stats
+    const records = await db.getAttendance();
+    const thisMonth = records.filter(record => {
+      const recordDate = new Date(record.date);
+      const now = new Date();
+      return recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear();
+    });
+    
+    const presentDaysElement = document.getElementById('presentDays');
+    const absentDaysElement = document.getElementById('absentDays');
+    
+    if (presentDaysElement) presentDaysElement.innerHTML = thisMonth.length;
+    if (absentDaysElement) absentDaysElement.innerHTML = Math.max(0, 22 - thisMonth.length);
+
+    // Update employees count
+    const employees = await db.getEmployees();
+    const totalEmployeesElement = document.getElementById('totalEmployees');
+    if (totalEmployeesElement) {
+      totalEmployeesElement.innerHTML = employees.length;
+    }
+
+    // Update pending salaries (mock data)
+    const pendingSalariesElement = document.getElementById('pendingSalaries');
+    if (pendingSalariesElement) {
+      pendingSalariesElement.innerHTML = Math.max(0, employees.length - 1);
+    }
+
+    // Update recent invoices (mock data)
+    const recentInvoicesElement = document.getElementById('recentInvoices');
+    if (recentInvoicesElement) {
+      const invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+      recentInvoicesElement.innerHTML = invoices.length;
+    }
+
+  } catch (error) {
+    console.error('Error updating dashboard stats:', error);
+  }
+}
+
+// Initialize notification container
+document.addEventListener('DOMContentLoaded', function() {
+  if (!document.getElementById('notificationContainer')) {
+    const container = document.createElement('div');
+    container.id = 'notificationContainer';
+    container.className = 'notification-container';
+    document.body.appendChild(container);
+  }
+});

@@ -7,10 +7,20 @@
     <link rel="stylesheet" href="style.css">
     <meta name="theme-color" content="#2563eb">
     <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiUksgSU5GT1RFQ0giLCJzaG9ydF9uYW1lIjoiUktJVCIsInN0YXJ0X3VybCI6Ii8iLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsInRoZW1lX2NvbG9yIjoiIzI1NjNlYiIsImJhY2tncm91bmRfY29sb3IiOiIjZmZmZmZmIn0=">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.5.31/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
+    <!-- Database Connection Status -->
+    <div id="connectionStatus" class="connection-status">
+        <div class="connection-indicator">
+            <div class="connection-dot" id="connectionDot"></div>
+            <span id="connectionText">Connecting to database...</span>
+        </div>
+        <div class="sync-status" id="syncStatus"></div>
+    </div>
+
     <!-- Header -->
     <header class="app-header">
         <div class="header-content">
@@ -19,7 +29,10 @@
                 <span class="company-name">RK INFOTECH</span>
             </div>
             <div class="user-info">
-                <span id="currentDate"></span>
+                <div class="db-status" id="dbStatusIndicator">
+                    <div class="status-dot" id="headerStatusDot"></div>
+                    <span id="currentDate"></span>
+                </div>
             </div>
         </div>
     </header>
@@ -31,36 +44,52 @@
             <div class="container">
                 <div class="welcome-card">
                     <h2>Welcome Back!</h2>
-                    <p>Manage your business operations efficiently</p>
+                    <p>Manage your business operations efficiently with cloud sync</p>
+                    <div class="cloud-status">
+                        <span class="status-badge" id="cloudStatusBadge">
+                            <span class="loading-dot"></span>
+                            Syncing...
+                        </span>
+                    </div>
                 </div>
 
                 <div class="stats-grid">
-                    <div class="stat-card">
+                    <div class="stat-card" id="attendanceCard">
                         <div class="stat-icon">⏰</div>
                         <div class="stat-info">
                             <h3 id="attendanceStatus">Not Checked In</h3>
                             <p>Today's Status</p>
+                            <div class="sync-indicator" id="attendanceSync"></div>
                         </div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card" id="employeesCard">
                         <div class="stat-icon">👥</div>
                         <div class="stat-info">
-                            <h3 id="totalEmployees">3</h3>
+                            <h3 id="totalEmployees">
+                                <span class="loading-placeholder">-</span>
+                            </h3>
                             <p>Total Employees</p>
+                            <div class="sync-indicator" id="employeesSync"></div>
                         </div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card" id="payrollCard">
                         <div class="stat-icon">💰</div>
                         <div class="stat-info">
-                            <h3 id="pendingSalaries">2</h3>
+                            <h3 id="pendingSalaries">
+                                <span class="loading-placeholder">-</span>
+                            </h3>
                             <p>Pending Salaries</p>
+                            <div class="sync-indicator" id="payrollSync"></div>
                         </div>
                     </div>
-                    <div class="stat-card">
+                    <div class="stat-card" id="invoicesCard">
                         <div class="stat-icon">📋</div>
                         <div class="stat-info">
-                            <h3 id="recentInvoices">5</h3>
+                            <h3 id="recentInvoices">
+                                <span class="loading-placeholder">-</span>
+                            </h3>
                             <p>Recent Invoices</p>
+                            <div class="sync-indicator" id="invoicesSync"></div>
                         </div>
                     </div>
                 </div>
@@ -68,10 +97,31 @@
                 <div class="quick-actions">
                     <h3>Quick Actions</h3>
                     <div class="action-buttons">
-                        <button class="btn btn--primary" onclick="switchTab('attendance')">Clock In/Out</button>
-                        <button class="btn btn--secondary" onclick="switchTab('employees')">Manage Employees</button>
-                        <button class="btn btn--secondary" onclick="switchTab('payroll')">Generate Salary</button>
-                        <button class="btn btn--secondary" onclick="switchTab('invoices')">Create Invoice</button>
+                        <button class="btn btn--primary" onclick="switchTab('attendance')" id="clockBtn">
+                            <span class="btn-icon">⏰</span>
+                            Clock In/Out
+                        </button>
+                        <button class="btn btn--secondary" onclick="switchTab('employees')" id="employeesBtn">
+                            <span class="btn-icon">👥</span>
+                            Manage Employees
+                        </button>
+                        <button class="btn btn--secondary" onclick="switchTab('payroll')" id="payrollBtn">
+                            <span class="btn-icon">💰</span>
+                            Generate Salary
+                        </button>
+                        <button class="btn btn--secondary" onclick="switchTab('invoices')" id="invoicesBtn">
+                            <span class="btn-icon">📋</span>
+                            Create Invoice
+                        </button>
+                    </div>
+                </div>
+
+                <div class="database-info">
+                    <div class="info-card">
+                        <h3>Database Configuration</h3>
+                        <div class="db-config-status" id="dbConfigStatus">
+                            <p class="config-message">Checking database configuration...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -82,6 +132,10 @@
             <div class="container">
                 <div class="section-header">
                     <h2>Attendance Management</h2>
+                    <div class="realtime-indicator" id="attendanceRealtime">
+                        <div class="realtime-dot"></div>
+                        <span>Live Updates</span>
+                    </div>
                 </div>
 
                 <div class="attendance-card">
@@ -94,8 +148,14 @@
                     </div>
 
                     <div class="clock-actions">
-                        <button id="clockInBtn" class="btn btn--primary btn--lg" onclick="clockIn()">Clock In</button>
-                        <button id="clockOutBtn" class="btn btn--outline btn--lg" onclick="clockOut()" disabled>Clock Out</button>
+                        <button id="clockInBtn" class="btn btn--primary btn--lg" onclick="clockIn()">
+                            <span class="loading-spinner hidden"></span>
+                            Clock In
+                        </button>
+                        <button id="clockOutBtn" class="btn btn--outline btn--lg" onclick="clockOut()" disabled>
+                            <span class="loading-spinner hidden"></span>
+                            Clock Out
+                        </button>
                     </div>
 
                     <div class="work-hours">
@@ -104,7 +164,13 @@
                 </div>
 
                 <div class="attendance-history">
-                    <h3>Attendance History</h3>
+                    <div class="history-header">
+                        <h3>Attendance History</h3>
+                        <button class="btn btn--xs btn--secondary" onclick="refreshAttendanceHistory()" id="refreshAttendanceBtn">
+                            <span class="loading-spinner hidden"></span>
+                            Refresh
+                        </button>
+                    </div>
                     <div class="history-table">
                         <div class="table-header">
                             <span>Date</span>
@@ -113,7 +179,9 @@
                             <span>Hours</span>
                         </div>
                         <div id="attendanceHistoryList" class="table-body">
-                            <!-- History items will be populated by JavaScript -->
+                            <div class="loading-row">
+                                <span class="loading-placeholder full-width">Loading attendance records...</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -127,11 +195,15 @@
                         </div>
                         <div class="summary-item">
                             <span class="summary-label">Present Days</span>
-                            <span class="summary-value" id="presentDays">20</span>
+                            <span class="summary-value" id="presentDays">
+                                <span class="loading-placeholder">-</span>
+                            </span>
                         </div>
                         <div class="summary-item">
                             <span class="summary-label">Absent Days</span>
-                            <span class="summary-value" id="absentDays">2</span>
+                            <span class="summary-value" id="absentDays">
+                                <span class="loading-placeholder">-</span>
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -143,7 +215,13 @@
             <div class="container">
                 <div class="section-header">
                     <h2>Employee Management</h2>
-                    <button class="btn btn--primary" onclick="showAddEmployeeModal()">Add New Employee</button>
+                    <div class="section-actions">
+                        <button class="btn btn--secondary btn--sm" onclick="refreshEmployees()" id="refreshEmployeesBtn">
+                            <span class="loading-spinner hidden"></span>
+                            Refresh
+                        </button>
+                        <button class="btn btn--primary" onclick="showAddEmployeeModal()">Add New Employee</button>
+                    </div>
                 </div>
 
                 <div class="employee-controls">
@@ -160,7 +238,13 @@
                 </div>
 
                 <div class="employee-list" id="employeeList">
-                    <!-- Employee cards will be populated by JavaScript -->
+                    <div class="loading-card">
+                        <div class="loading-skeleton">
+                            <div class="skeleton-header"></div>
+                            <div class="skeleton-content"></div>
+                        </div>
+                        <p class="loading-text">Loading employees from database...</p>
+                    </div>
                 </div>
             </div>
         </section>
@@ -170,6 +254,10 @@
             <div class="container">
                 <div class="section-header">
                     <h2>Payroll Management</h2>
+                    <div class="realtime-indicator" id="payrollRealtime">
+                        <div class="realtime-dot"></div>
+                        <span>Live Data</span>
+                    </div>
                 </div>
 
                 <div class="payroll-form">
@@ -179,7 +267,7 @@
                             <div class="form-group">
                                 <label class="form-label">Employee</label>
                                 <select id="employeeSelect" class="form-control" onchange="loadEmployeeDetails()">
-                                    <option value="">Select Employee</option>
+                                    <option value="">Loading employees...</option>
                                 </select>
                             </div>
                             <div class="form-group">
@@ -286,6 +374,16 @@
             <div class="container">
                 <div class="section-header">
                     <h2>Invoice Management</h2>
+                    <div class="section-actions">
+                        <button class="btn btn--secondary btn--sm" onclick="refreshClients()" id="refreshClientsBtn">
+                            <span class="loading-spinner hidden"></span>
+                            Refresh Clients
+                        </button>
+                        <button class="btn btn--secondary btn--sm" onclick="refreshInvoices()" id="refreshInvoicesBtn">
+                            <span class="loading-spinner hidden"></span>
+                            Refresh Invoices
+                        </button>
+                    </div>
                 </div>
 
                 <div class="invoice-form">
@@ -315,7 +413,7 @@
                             <div class="form-group">
                                 <label class="form-label">Client</label>
                                 <select id="clientSelect" class="form-control" onchange="loadClientDetails()">
-                                    <option value="">Select Client</option>
+                                    <option value="">Loading clients...</option>
                                 </select>
                             </div>
                         </div>
@@ -391,6 +489,10 @@
 
                     <div class="form-actions">
                         <button class="btn btn--primary" onclick="previewInvoice()">Preview Invoice</button>
+                        <button class="btn btn--secondary" onclick="saveInvoice()" id="saveInvoiceBtn">
+                            <span class="loading-spinner hidden"></span>
+                            Save Invoice
+                        </button>
                         <button class="btn btn--secondary" onclick="downloadInvoicePDF()" id="downloadInvoiceBtn" disabled>Download PDF</button>
                     </div>
                 </div>
@@ -402,9 +504,38 @@
             <div class="container">
                 <div class="section-header">
                     <h2>Settings</h2>
+                    <div class="realtime-indicator" id="settingsRealtime">
+                        <div class="realtime-dot"></div>
+                        <span>Cloud Sync</span>
+                    </div>
                 </div>
 
                 <div class="settings-groups">
+                    <div class="settings-group">
+                        <h3>Database Configuration</h3>
+                        <div class="database-setup" id="databaseSetup">
+                            <div class="setup-status" id="setupStatus">
+                                <div class="status-indicator">
+                                    <div class="status-dot" id="setupStatusDot"></div>
+                                    <span id="setupStatusText">Checking configuration...</span>
+                                </div>
+                            </div>
+                            <div class="setup-instructions">
+                                <h4>Supabase Setup Instructions:</h4>
+                                <ol>
+                                    <li>Create a new Supabase project at <a href="https://supabase.com" target="_blank">supabase.com</a></li>
+                                    <li>Copy your project URL and anon key</li>
+                                    <li>Replace the placeholders in the configuration</li>
+                                    <li>Run the database schema setup queries</li>
+                                </ol>
+                                <div class="config-display">
+                                    <p><strong>Current URL:</strong> <code id="currentUrl">YOUR_SUPABASE_URL</code></p>
+                                    <p><strong>Current Key:</strong> <code id="currentKey">YOUR_SUPABASE_ANON_KEY</code></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="settings-group">
                         <h3>Company Information</h3>
                         <div class="form-group">
@@ -429,36 +560,27 @@
                     </div>
 
                     <div class="settings-group">
-                        <h3>Templates</h3>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Invoice Template</label>
-                                <select id="invoiceTemplate" class="form-control">
-                                    <option value="template1">Professional Blue</option>
-                                    <option value="template2">Corporate Green</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Salary Template</label>
-                                <select id="salaryTemplate" class="form-control">
-                                    <option value="salary1">Standard Template</option>
-                                    <option value="salary2">Professional Template</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="settings-group">
                         <h3>Data Management</h3>
                         <div class="data-actions">
+                            <button class="btn btn--secondary" onclick="syncAllData()" id="syncAllBtn">
+                                <span class="loading-spinner hidden"></span>
+                                Sync All Data
+                            </button>
                             <button class="btn btn--secondary" onclick="exportData()">Export Data</button>
-                            <button class="btn btn--outline" onclick="clearData()">Clear All Data</button>
+                            <button class="btn btn--outline" onclick="clearLocalData()">Clear Local Cache</button>
+                            <button class="btn btn--danger" onclick="resetDatabase()">Reset Database</button>
+                        </div>
+                        <div class="sync-info">
+                            <p><small>Last sync: <span id="lastSync">Never</span></small></p>
                         </div>
                     </div>
                 </div>
 
                 <div class="form-actions">
-                    <button class="btn btn--primary" onclick="saveSettings()">Save Settings</button>
+                    <button class="btn btn--primary" onclick="saveSettings()" id="saveSettingsBtn">
+                        <span class="loading-spinner hidden"></span>
+                        Save Settings
+                    </button>
                 </div>
             </div>
         </section>
@@ -553,21 +675,21 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Bank Account Number</label>
-                            <input type="text" id="empBankAccount" class="form-control" required>
+                            <input type="text" id="empBankAccount" class="form-control">
                         </div>
                         <div class="form-group">
                             <label class="form-label">IFSC Code</label>
-                            <input type="text" id="empIfsc" class="form-control" required>
+                            <input type="text" id="empIfsc" class="form-control">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">PAN Number</label>
-                            <input type="text" id="empPan" class="form-control" required>
+                            <input type="text" id="empPan" class="form-control">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Join Date</label>
-                            <input type="date" id="empJoinDate" class="form-control" required>
+                            <input type="date" id="empJoinDate" class="form-control">
                         </div>
                     </div>
                     <div class="form-section">
@@ -575,27 +697,27 @@
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Basic Salary</label>
-                                <input type="number" id="empBasicSalary" class="form-control" required>
+                                <input type="number" id="empBasicSalary" class="form-control">
                             </div>
                             <div class="form-group">
                                 <label class="form-label">HRA Amount</label>
-                                <input type="number" id="empHra" class="form-control" required>
+                                <input type="number" id="empHra" class="form-control">
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">DA Amount</label>
-                                <input type="number" id="empDa" class="form-control" required>
+                                <input type="number" id="empDa" class="form-control">
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Medical Allowance</label>
-                                <input type="number" id="empMedical" class="form-control" required>
+                                <input type="number" id="empMedical" class="form-control">
                             </div>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label">Conveyance Allowance</label>
-                                <input type="number" id="empConveyance" class="form-control" required>
+                                <input type="number" id="empConveyance" class="form-control">
                             </div>
                         </div>
                     </div>
@@ -603,10 +725,17 @@
                         <label class="form-label">Address</label>
                         <textarea id="empAddress" class="form-control" rows="3"></textarea>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label">Emergency Contact</label>
+                        <input type="tel" id="empEmergencyContact" class="form-control">
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn btn--primary" onclick="saveEmployee()">Save Employee</button>
+                <button class="btn btn--primary" onclick="saveEmployee()" id="saveEmployeeBtn">
+                    <span class="loading-spinner hidden"></span>
+                    Save Employee
+                </button>
                 <button class="btn btn--secondary" onclick="closeModal('employeeModal')">Cancel</button>
             </div>
         </div>
@@ -649,9 +778,12 @@
     <div id="loadingModal" class="modal hidden">
         <div class="modal-content">
             <div class="loading-spinner"></div>
-            <p>Processing...</p>
+            <p id="loadingMessage">Processing...</p>
         </div>
     </div>
+
+    <!-- Notification Container -->
+    <div id="notificationContainer" class="notification-container"></div>
 
     <script src="app.js"></script>
 </body>
