@@ -1,12 +1,133 @@
-// RK INFOTECH Business Management App with Supabase Integration
+// RK INFOTECH Business Management System with Complete Authentication and Enhanced Features
 
 // Supabase Configuration
 const SUPABASE_CONFIG = {
-  url: 'https://tgnriyzxnkglnwahjdhi.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRnbnJpeXp4bmtnbG53YWhqZGhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk2MDI2MjAsImV4cCI6MjA3NTE3ODYyMH0.FZRWkiZYU3srY0kH0IewZfoQKocmOHuCsOsrBM1sZSI'
+  url: 'YOUR_SUPABASE_URL',
+  anonKey: 'YOUR_SUPABASE_ANON_KEY'
 };
 
-// Database Service Layer
+// Authentication Service
+class AuthService {
+  constructor() {
+    this.currentUser = null;
+    this.isAuthenticated = false;
+    this.userRole = 'employee';
+  }
+
+  async initialize() {
+    // Check if user is logged in from session
+    const storedUser = localStorage.getItem('currentUser');
+    const storedSession = localStorage.getItem('userSession');
+    
+    if (storedUser && storedSession) {
+      const sessionData = JSON.parse(storedSession);
+      if (sessionData.expires > Date.now()) {
+        this.currentUser = JSON.parse(storedUser);
+        this.isAuthenticated = true;
+        this.userRole = this.currentUser.role || 'employee';
+        this.setupUserInterface();
+        return true;
+      } else {
+        this.logout();
+      }
+    }
+    return false;
+  }
+
+  async login(email, password) {
+    // Demo authentication - replace with Supabase auth when configured
+    const demoUsers = [
+      {
+        id: 'admin-001',
+        email: 'admin@rkinfotech.com',
+        password: 'admin123',
+        name: 'Administrator',
+        role: 'admin',
+        employee_id: 'ADM001'
+      },
+      {
+        id: 'emp-001',
+        email: 'rajesh@rkinfotech.com',
+        password: 'employee123',
+        name: 'Rajesh Kumar',
+        role: 'employee',
+        employee_id: 'EMP001'
+      }
+    ];
+
+    const user = demoUsers.find(u => u.email === email && u.password === password);
+    
+    if (user) {
+      this.currentUser = user;
+      this.isAuthenticated = true;
+      this.userRole = user.role;
+      
+      // Store session
+      const sessionData = {
+        userId: user.id,
+        expires: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+      };
+      
+      localStorage.setItem('currentUser', JSON.stringify(user));
+      localStorage.setItem('userSession', JSON.stringify(sessionData));
+      
+      this.setupUserInterface();
+      return { success: true, user };
+    } else {
+      return { success: false, error: 'Invalid email or password' };
+    }
+  }
+
+  async logout() {
+    this.currentUser = null;
+    this.isAuthenticated = false;
+    this.userRole = 'employee';
+    
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('userSession');
+    
+    // Show login screen
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('mainApp').classList.add('hidden');
+    document.body.classList.remove('admin');
+    
+    showNotification('Logged out successfully', 'info');
+  }
+
+  async resetPassword(email) {
+    // Demo password reset
+    showNotification('Password reset link sent to ' + email, 'success');
+    return { success: true };
+  }
+
+  setupUserInterface() {
+    // Hide login screen, show main app
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainApp').classList.remove('hidden');
+    
+    // Set user info
+    document.getElementById('userName').textContent = this.currentUser.name;
+    document.getElementById('userRole').textContent = this.userRole.charAt(0).toUpperCase() + this.userRole.slice(1);
+    document.getElementById('welcomeUser').textContent = this.currentUser.name;
+    
+    // Apply role-based styling
+    if (this.userRole === 'admin') {
+      document.body.classList.add('admin');
+    }
+    
+    showNotification(`Welcome back, ${this.currentUser.name}!`, 'success');
+  }
+
+  getCurrentUser() {
+    return this.currentUser;
+  }
+
+  isAdmin() {
+    return this.userRole === 'admin';
+  }
+}
+
+// Enhanced Database Service with Authentication
 class DatabaseService {
   constructor() {
     this.supabase = null;
@@ -19,17 +140,17 @@ class DatabaseService {
     try {
       if (SUPABASE_CONFIG.url === 'YOUR_SUPABASE_URL' || SUPABASE_CONFIG.anonKey === 'YOUR_SUPABASE_ANON_KEY') {
         console.warn('Supabase not configured. Using local storage fallback.');
-        this.updateConnectionStatus(false, 'Not configured');
+        this.updateConnectionStatus(false, 'Not configured - Using demo mode');
+        await this.initializeDemoData();
         return;
       }
 
       this.supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
       
       // Test connection
-      const { data, error } = await this.supabase.from('company_settings').select('*').limit(1);
+      const { data, error } = await this.supabase.from('employees').select('*').limit(1);
       
       if (error && error.code === '42P01') {
-        // Table doesn't exist - show setup instructions
         this.updateConnectionStatus(false, 'Database schema not set up');
         this.showSchemaSetupInstructions();
       } else if (error) {
@@ -42,6 +163,94 @@ class DatabaseService {
     } catch (error) {
       console.error('Supabase initialization error:', error);
       this.updateConnectionStatus(false, `Error: ${error.message}`);
+      await this.initializeDemoData();
+    }
+  }
+
+  async initializeDemoData() {
+    // Initialize with demo data if no data exists
+    if (!localStorage.getItem('employees')) {
+      const demoEmployees = [
+        {
+          id: 'EMP001',
+          auth_id: 'emp-001',
+          employee_id: 'EMP001',
+          name: 'Rajesh Kumar',
+          email: 'rajesh@rkinfotech.com',
+          designation: 'Software Developer',
+          department: 'IT',
+          phone: '9876543211',
+          role: 'employee',
+          status: 'active',
+          basic_salary: 50000,
+          hra: 15000,
+          da: 5000,
+          medical_allowance: 2000,
+          conveyance_allowance: 1000,
+          join_date: '2023-01-15',
+          address: '123 Main Street, Bangalore',
+          emergency_contact: '9876543299',
+          created_at: new Date().toISOString()
+        },
+        {
+          id: 'ADM001',
+          auth_id: 'admin-001',
+          employee_id: 'ADM001',
+          name: 'Administrator',
+          email: 'admin@rkinfotech.com',
+          designation: 'System Administrator',
+          department: 'Management',
+          phone: '9876543210',
+          role: 'admin',
+          status: 'active',
+          basic_salary: 100000,
+          hra: 30000,
+          da: 10000,
+          medical_allowance: 5000,
+          conveyance_allowance: 2000,
+          join_date: '2022-01-01',
+          address: '456 Admin Street, Bangalore',
+          emergency_contact: '9876543288',
+          created_at: new Date().toISOString()
+        }
+      ];
+      
+      localStorage.setItem('employees', JSON.stringify(demoEmployees));
+    }
+
+    if (!localStorage.getItem('vendors')) {
+      const demoVendors = [
+        {
+          id: 'VEN001',
+          vendor_id: 'VEN001',
+          name: 'Tech Solutions Ltd',
+          contact_person: 'John Smith',
+          email: 'john@techsolutions.com',
+          phone: '+91-9876543220',
+          address: '123 Business Park, Mumbai',
+          gst_number: '27ABCDE1234F1Z5',
+          service_category: 'IT Services',
+          payment_terms: '30 days',
+          status: 'active',
+          created_at: new Date().toISOString()
+        },
+        {
+          id: 'VEN002',
+          vendor_id: 'VEN002',
+          name: 'Office Supplies Co',
+          contact_person: 'Sarah Johnson',
+          email: 'sarah@officesupplies.com',
+          phone: '+91-9876543221',
+          address: '456 Supply Street, Delhi',
+          gst_number: '07FGHIJ5678K1L9',
+          service_category: 'Office Supplies',
+          payment_terms: '15 days',
+          status: 'active',
+          created_at: new Date().toISOString()
+        }
+      ];
+      
+      localStorage.setItem('vendors', JSON.stringify(demoVendors));
     }
   }
 
@@ -69,20 +278,9 @@ class DatabaseService {
       cloudStatusBadge.className = `status-badge ${connected ? 'active' : 'offline'}`;
       cloudStatusBadge.innerHTML = connected ? 
         '<div class="loading-dot"></div>Synced' : 
-        '<div class="loading-dot"></div>Offline';
+        '<div class="loading-dot"></div>Demo Mode';
     }
 
-    // Update database configuration status
-    const dbConfigStatus = document.getElementById('dbConfigStatus');
-    if (dbConfigStatus) {
-      if (connected) {
-        dbConfigStatus.innerHTML = '<p class="config-message text-success">✅ Database connected and ready</p>';
-      } else {
-        dbConfigStatus.innerHTML = `<p class="config-message text-error">❌ ${message}</p>`;
-      }
-    }
-
-    // Show/hide offline banner
     this.toggleOfflineBanner(!connected);
   }
 
@@ -92,196 +290,14 @@ class DatabaseService {
       banner = document.createElement('div');
       banner.id = 'offlineBanner';
       banner.className = 'offline-mode';
-      banner.innerHTML = '📡 Working in offline mode - Changes will sync when connection is restored';
+      banner.innerHTML = '📡 Demo Mode - Changes stored locally';
       document.body.appendChild(banner);
     } else if (!show && banner) {
       banner.remove();
     }
   }
 
-  showSchemaSetupInstructions() {
-    const setupStatus = document.getElementById('setupStatus');
-    if (setupStatus) {
-      setupStatus.innerHTML = `
-        <div class="status-indicator">
-          <div class="status-dot disconnected"></div>
-          <span>Database schema setup required</span>
-        </div>
-        <div class="setup-sql" style="margin-top: 16px;">
-          <h5>Run these SQL commands in your Supabase SQL Editor:</h5>
-          <textarea class="form-control" rows="10" readonly style="font-family: monospace; font-size: 12px;">
--- Create employees table
-CREATE TABLE employees (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  designation TEXT,
-  department TEXT,
-  email TEXT UNIQUE,
-  phone TEXT,
-  bank_account TEXT,
-  ifsc TEXT,
-  pan_number TEXT,
-  basic_salary DECIMAL(10,2),
-  hra DECIMAL(10,2),
-  da DECIMAL(10,2),
-  medical_allowance DECIMAL(10,2),
-  conveyance_allowance DECIMAL(10,2),
-  join_date DATE,
-  address TEXT,
-  emergency_contact TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create attendance table
-CREATE TABLE attendance (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  employee_id UUID REFERENCES employees(id),
-  date DATE NOT NULL,
-  check_in TIME,
-  check_out TIME,
-  total_hours INTERVAL,
-  location TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create invoices table
-CREATE TABLE invoices (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  invoice_number TEXT UNIQUE NOT NULL,
-  client_name TEXT NOT NULL,
-  client_address TEXT,
-  client_gst TEXT,
-  items JSONB,
-  total_amount DECIMAL(10,2),
-  tax_amount DECIMAL(10,2),
-  grand_total DECIMAL(10,2),
-  status TEXT DEFAULT 'draft',
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create clients table
-CREATE TABLE clients (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  address TEXT,
-  phone TEXT,
-  email TEXT,
-  gst TEXT,
-  contact_person TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-
--- Create company_settings table
-CREATE TABLE company_settings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  address TEXT,
-  phone TEXT,
-  email TEXT,
-  gst TEXT,
-  logo_url TEXT,
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
-          </textarea>
-          <p style="margin-top: 12px; font-size: 12px; color: var(--color-text-secondary);">
-            After running these commands, refresh the page to reconnect.
-          </p>
-        </div>
-      `;
-    }
-  }
-
-  async setupRealtimeSubscriptions() {
-    if (!this.supabase || !this.isConnected) return;
-
-    try {
-      // Subscribe to employees changes
-      const employeesSubscription = this.supabase
-        .channel('employees-changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'employees' },
-          (payload) => this.handleRealtimeUpdate('employees', payload)
-        )
-        .subscribe();
-
-      // Subscribe to attendance changes  
-      const attendanceSubscription = this.supabase
-        .channel('attendance-changes')
-        .on('postgres_changes',
-          { event: '*', schema: 'public', table: 'attendance' },
-          (payload) => this.handleRealtimeUpdate('attendance', payload)
-        )
-        .subscribe();
-
-      // Subscribe to invoices changes
-      const invoicesSubscription = this.supabase
-        .channel('invoices-changes')
-        .on('postgres_changes',
-          { event: '*', schema: 'public', table: 'invoices' },
-          (payload) => this.handleRealtimeUpdate('invoices', payload)
-        )
-        .subscribe();
-
-      this.subscriptions.set('employees', employeesSubscription);
-      this.subscriptions.set('attendance', attendanceSubscription);
-      this.subscriptions.set('invoices', invoicesSubscription);
-
-      console.log('Real-time subscriptions established');
-      this.showSyncIndicators(true);
-
-    } catch (error) {
-      console.error('Error setting up real-time subscriptions:', error);
-    }
-  }
-
-  handleRealtimeUpdate(table, payload) {
-    console.log(`Real-time update for ${table}:`, payload);
-    
-    // Show sync indicators
-    const syncIndicator = document.getElementById(`${table}Sync`);
-    if (syncIndicator) {
-      syncIndicator.classList.add('syncing');
-      setTimeout(() => syncIndicator.classList.remove('syncing'), 1000);
-    }
-
-    // Refresh relevant UI sections
-    switch (table) {
-      case 'employees':
-        if (getCurrentActiveTab() === 'employees') {
-          loadEmployees();
-        }
-        populateEmployeeSelect();
-        updateDashboardStats();
-        break;
-      case 'attendance':
-        if (getCurrentActiveTab() === 'attendance') {
-          loadAttendanceHistory();
-        }
-        updateDashboardStats();
-        break;
-      case 'invoices':
-        updateDashboardStats();
-        break;
-    }
-
-    showNotification(`${table} updated in real-time`, 'info');
-  }
-
-  showSyncIndicators(active) {
-    const indicators = ['attendanceRealtime', 'payrollRealtime', 'settingsRealtime'];
-    indicators.forEach(id => {
-      const indicator = document.getElementById(id);
-      if (indicator) {
-        indicator.style.display = active ? 'flex' : 'none';
-      }
-    });
-  }
-
-  // CRUD operations with fallback to localStorage
+  // Employee Management
   async getEmployees() {
     if (!this.isConnected) {
       return JSON.parse(localStorage.getItem('employees') || '[]');
@@ -295,12 +311,10 @@ CREATE TABLE company_settings (
 
       if (error) throw error;
       
-      // Cache locally
       localStorage.setItem('employees', JSON.stringify(data));
       return data;
     } catch (error) {
       console.error('Error fetching employees:', error);
-      showNotification('Error loading employees from database', 'error');
       return JSON.parse(localStorage.getItem('employees') || '[]');
     }
   }
@@ -310,13 +324,12 @@ CREATE TABLE company_settings (
     let employees = JSON.parse(localStorage.getItem('employees') || '[]');
     
     if (employee.id && employees.find(e => e.id === employee.id)) {
-      // Update existing
-      employees = employees.map(e => e.id === employee.id ? employee : e);
+      employees = employees.map(e => e.id === employee.id ? { ...e, ...employee, updated_at: new Date().toISOString() } : e);
     } else {
-      // Add new
       if (!employee.id) {
         employee.id = this.generateId();
       }
+      employee.created_at = new Date().toISOString();
       employees.push(employee);
     }
     
@@ -342,12 +355,10 @@ CREATE TABLE company_settings (
   }
 
   async deleteEmployee(employeeId) {
-    // Remove from localStorage
     let employees = JSON.parse(localStorage.getItem('employees') || '[]');
     employees = employees.filter(e => e.id !== employeeId);
     localStorage.setItem('employees', JSON.stringify(employees));
 
-    // Try to delete from Supabase if connected
     if (this.isConnected) {
       try {
         const { error } = await this.supabase
@@ -358,40 +369,53 @@ CREATE TABLE company_settings (
         if (error) throw error;
       } catch (error) {
         console.error('Error deleting employee from database:', error);
-        showNotification('Deleted locally - will sync when online', 'warning');
       }
     }
   }
 
-  async getAttendance(limit = 30) {
+  // Attendance Management
+  async getAttendance(employeeId = null, limit = 30) {
+    const key = employeeId ? `attendanceRecords_${employeeId}` : 'attendanceRecords';
+    
     if (!this.isConnected) {
-      return JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+      const records = JSON.parse(localStorage.getItem(key) || '[]');
+      return employeeId ? records.filter(r => r.employee_id === employeeId) : records;
     }
 
     try {
-      const { data, error } = await this.supabase
+      let query = this.supabase
         .from('attendance')
         .select('*')
         .order('date', { ascending: false })
         .limit(limit);
 
+      if (employeeId) {
+        query = query.eq('employee_id', employeeId);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
 
-      // Cache locally
-      localStorage.setItem('attendanceRecords', JSON.stringify(data));
+      localStorage.setItem(key, JSON.stringify(data));
       return data;
     } catch (error) {
       console.error('Error fetching attendance:', error);
-      showNotification('Error loading attendance from database', 'error');
-      return JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+      const records = JSON.parse(localStorage.getItem(key) || '[]');
+      return employeeId ? records.filter(r => r.employee_id === employeeId) : records;
     }
   }
 
   async saveAttendance(attendance) {
-    // Always save to localStorage first
+    const currentUser = auth.getCurrentUser();
+    attendance.employee_id = currentUser.id;
+    attendance.id = this.generateId();
+    attendance.created_at = new Date().toISOString();
+
+    // Save to localStorage
     let records = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
     records.unshift(attendance);
-    records = records.slice(0, 30);
+    records = records.slice(0, 100); // Keep last 100 records
     localStorage.setItem('attendanceRecords', JSON.stringify(records));
 
     // Try to save to Supabase if connected
@@ -399,11 +423,7 @@ CREATE TABLE company_settings (
       try {
         const { data, error } = await this.supabase
           .from('attendance')
-          .insert([{
-            ...attendance,
-            id: this.generateId(),
-            employee_id: attendance.employeeId
-          }])
+          .insert([attendance])
           .select();
 
         if (error) throw error;
@@ -417,53 +437,146 @@ CREATE TABLE company_settings (
     return attendance;
   }
 
-  async getClients() {
+  // Work Status Management
+  async getWorkStatus(employeeId = null, limit = 30) {
+    const key = employeeId ? `workStatus_${employeeId}` : 'workStatus';
+    
     if (!this.isConnected) {
-      return appData.clients; // Use static data as fallback
+      const records = JSON.parse(localStorage.getItem(key) || '[]');
+      return employeeId ? records.filter(r => r.employee_id === employeeId) : records;
     }
 
     try {
-      const { data, error } = await this.supabase
-        .from('clients')
+      let query = this.supabase
+        .from('work_status')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('date', { ascending: false })
+        .limit(limit);
+
+      if (employeeId) {
+        query = query.eq('employee_id', employeeId);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
-      return data.length > 0 ? data : appData.clients;
+
+      localStorage.setItem(key, JSON.stringify(data));
+      return data;
     } catch (error) {
-      console.error('Error fetching clients:', error);
-      return appData.clients;
+      console.error('Error fetching work status:', error);
+      const records = JSON.parse(localStorage.getItem(key) || '[]');
+      return employeeId ? records.filter(r => r.employee_id === employeeId) : records;
     }
   }
 
-  async saveInvoice(invoice) {
-    // Always save to localStorage first
-    let invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+  async saveWorkStatus(workStatus) {
+    const currentUser = auth.getCurrentUser();
+    workStatus.employee_id = currentUser.id;
+    workStatus.id = this.generateId();
+    workStatus.created_at = new Date().toISOString();
+    workStatus.status = 'pending';
+
+    // Save to localStorage
+    let records = JSON.parse(localStorage.getItem('workStatus') || '[]');
     
-    if (!invoice.id) {
-      invoice.id = this.generateId();
-    }
-    
-    invoices.unshift(invoice);
-    localStorage.setItem('invoices', JSON.stringify(invoices));
+    // Remove existing entry for the same date and employee
+    records = records.filter(r => !(r.date === workStatus.date && r.employee_id === workStatus.employee_id));
+    records.unshift(workStatus);
+    records = records.slice(0, 100);
+    localStorage.setItem('workStatus', JSON.stringify(records));
 
     // Try to save to Supabase if connected
     if (this.isConnected) {
       try {
         const { data, error } = await this.supabase
-          .from('invoices')
-          .insert([invoice])
+          .from('work_status')
+          .upsert([workStatus])
           .select();
 
         if (error) throw error;
         return data[0];
       } catch (error) {
-        console.error('Error saving invoice to database:', error);
-        showNotification('Invoice saved locally - will sync when online', 'warning');
+        console.error('Error saving work status to database:', error);
+        showNotification('Work status saved locally - will sync when online', 'warning');
       }
     }
 
-    return invoice;
+    return workStatus;
+  }
+
+  // Vendor Management
+  async getVendors() {
+    if (!this.isConnected) {
+      return JSON.parse(localStorage.getItem('vendors') || '[]');
+    }
+
+    try {
+      const { data, error } = await this.supabase
+        .from('vendors')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      
+      localStorage.setItem('vendors', JSON.stringify(data));
+      return data;
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+      return JSON.parse(localStorage.getItem('vendors') || '[]');
+    }
+  }
+
+  async saveVendor(vendor) {
+    let vendors = JSON.parse(localStorage.getItem('vendors') || '[]');
+    
+    if (vendor.id && vendors.find(v => v.id === vendor.id)) {
+      vendors = vendors.map(v => v.id === vendor.id ? { ...v, ...vendor, updated_at: new Date().toISOString() } : v);
+    } else {
+      if (!vendor.id) {
+        vendor.id = this.generateId();
+      }
+      vendor.created_at = new Date().toISOString();
+      vendors.push(vendor);
+    }
+    
+    localStorage.setItem('vendors', JSON.stringify(vendors));
+
+    if (this.isConnected) {
+      try {
+        const { data, error } = await this.supabase
+          .from('vendors')
+          .upsert([vendor])
+          .select();
+
+        if (error) throw error;
+        return data[0];
+      } catch (error) {
+        console.error('Error saving vendor to database:', error);
+        showNotification('Vendor saved locally - will sync when online', 'warning');
+      }
+    }
+
+    return vendor;
+  }
+
+  async deleteVendor(vendorId) {
+    let vendors = JSON.parse(localStorage.getItem('vendors') || '[]');
+    vendors = vendors.filter(v => v.id !== vendorId);
+    localStorage.setItem('vendors', JSON.stringify(vendors));
+
+    if (this.isConnected) {
+      try {
+        const { error } = await this.supabase
+          .from('vendors')
+          .delete()
+          .eq('id', vendorId);
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('Error deleting vendor from database:', error);
+      }
+    }
   }
 
   generateId() {
@@ -473,168 +586,31 @@ CREATE TABLE company_settings (
       return v.toString(16);
     });
   }
-
-  async syncAllData() {
-    if (!this.isConnected) {
-      showNotification('Cannot sync - database not connected', 'error');
-      return;
-    }
-
-    showNotification('Starting data synchronization...', 'info');
-    setButtonLoading('syncAllBtn', true);
-
-    try {
-      // Sync employees
-      const localEmployees = JSON.parse(localStorage.getItem('employees') || '[]');
-      for (const employee of localEmployees) {
-        await this.saveEmployee(employee);
-      }
-
-      // Sync attendance
-      const localAttendance = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
-      for (const record of localAttendance) {
-        await this.saveAttendance(record);
-      }
-
-      // Update last sync timestamp
-      localStorage.setItem('lastSync', new Date().toISOString());
-      updateLastSyncDisplay();
-
-      showNotification('Data synchronization completed', 'success');
-    } catch (error) {
-      console.error('Sync error:', error);
-      showNotification('Synchronization failed: ' + error.message, 'error');
-    } finally {
-      setButtonLoading('syncAllBtn', false);
-    }
-  }
 }
 
-// Initialize database service
+// Initialize services
+const auth = new AuthService();
 const db = new DatabaseService();
 
-// Application data from JSON
+// Application Data
 const appData = {
-  "company": {
-    "name": "RK INFOTECH",
-    "address": "123 Tech Park, Bangalore, Karnataka 560001",
-    "phone": "+91-9876543210",
-    "email": "contact@rkinfotech.com",
-    "gst": "29ABCDE1234F1Z5",
-    "website": "www.rkinfotech.com",
-    "bankName": "HDFC Bank",
-    "bankAccount": "50100123456789",
-    "ifscCode": "HDFC0001234"
+  company: {
+    name: "RK INFOTECH",
+    address: "123 Tech Park, Bangalore, Karnataka 560001",
+    phone: "+91-9876543210",
+    email: "contact@rkinfotech.com",
+    gst: "29ABCDE1234F1Z5",
+    website: "www.rkinfotech.com"
   },
-  "employees": [
-    {
-      "id": "EMP001",
-      "name": "Rajesh Kumar",
-      "designation": "Software Developer",
-      "department": "IT",
-      "email": "rajesh@rkinfotech.com",
-      "phone": "9876543211",
-      "bank_account": "1234567890123456",
-      "ifsc": "HDFC0001234",
-      "pan_number": "ABCDE1234F",
-      "basic_salary": 50000,
-      "hra": 15000,
-      "da": 5000,
-      "medical_allowance": 2000,
-      "conveyance_allowance": 1000,
-      "join_date": "2023-01-15",
-      "address": "123 Main Street, Bangalore",
-      "emergency_contact": "9876543299"
-    },
-    {
-      "id": "EMP002",
-      "name": "Priya Sharma",
-      "designation": "Project Manager",
-      "department": "IT",
-      "email": "priya@rkinfotech.com",
-      "phone": "9876543212",
-      "bank_account": "2345678901234567",
-      "ifsc": "HDFC0001234",
-      "pan_number": "BCDEF2345G",
-      "basic_salary": 75000,
-      "hra": 22500,
-      "da": 7500,
-      "medical_allowance": 3000,
-      "conveyance_allowance": 1500,
-      "join_date": "2022-06-01",
-      "address": "456 Park Avenue, Bangalore",
-      "emergency_contact": "9876543298"
-    }
-  ],
-  "clients": [
-    {
-      "id": "CLIENT001",
-      "name": "ABC Technologies Pvt Ltd",
-      "address": "456 Business Park, Mumbai, Maharashtra 400001",
-      "phone": "+91-9876543220",
-      "email": "info@abctech.com",
-      "gst": "27FGHIJ5678K1L9",
-      "contact_person": "Mr. John Smith"
-    },
-    {
-      "id": "CLIENT002",
-      "name": "XYZ Solutions Ltd",
-      "address": "789 Corporate Center, Delhi, Delhi 110001",
-      "phone": "+91-9876543230",
-      "email": "contact@xyzsolutions.com",
-      "gst": "07MNOPQ9012R3S4",
-      "contact_person": "Ms. Sarah Johnson"
-    }
-  ],
-  "services": [
-    {
-      "id": "SRV001",
-      "name": "Web Development",
-      "description": "Custom website development services",
-      "rate": 1500,
-      "unit": "hour",
-      "category": "Development"
-    },
-    {
-      "id": "SRV002",
-      "name": "Mobile App Development",
-      "description": "iOS and Android application development",
-      "rate": 2000,
-      "unit": "hour",
-      "category": "Development"
-    },
-    {
-      "id": "SRV003",
-      "name": "UI/UX Design",
-      "description": "User interface and experience design",
-      "rate": 1200,
-      "unit": "hour",
-      "category": "Design"
-    },
-    {
-      "id": "SRV004",
-      "name": "Software Consultation",
-      "description": "Technical consultation and strategy",
-      "rate": 2500,
-      "unit": "hour",
-      "category": "Consultation"
-    }
-  ],
-  "deductions": {
-    "pfRate": 12,
-    "esiRate": 0.75,
-    "professionalTax": 200,
-    "incomeTaxRate": 10
-  },
-  "taxRates": {
-    "cgst": 9,
-    "sgst": 9,
-    "igst": 18
+  deductions: {
+    pfRate: 12,
+    esiRate: 0.75,
+    professionalTax: 200,
+    incomeTaxRate: 10
   }
 };
 
 // Global state
-let currentUser = appData.employees[0];
 let attendanceState = {
   isCheckedIn: false,
   checkInTime: null,
@@ -642,86 +618,98 @@ let attendanceState = {
 };
 
 let currentSalaryData = null;
-let currentInvoiceData = null;
 let editingEmployeeId = null;
+let editingVendorId = null;
 
 // Initialize app on load
-document.addEventListener('DOMContentLoaded', function() {
-  initializeApp();
+document.addEventListener('DOMContentLoaded', async function() {
+  // Check authentication first
+  const isLoggedIn = await auth.initialize();
+  
+  if (isLoggedIn) {
+    initializeApp();
+  } else {
+    showLoginScreen();
+  }
 });
+
+function showLoginScreen() {
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.getElementById('mainApp').classList.add('hidden');
+}
 
 function initializeApp() {
   updateCurrentDate();
   loadAttendanceState();
   loadEmployees();
   populateEmployeeSelect();
-  populateClientSelect();
-  populateServiceSelects();
+  loadVendors();
   loadAttendanceHistory();
+  loadWorkStatusHistory();
   updateDashboardStats();
   updateClock();
   setupEventListeners();
   setDefaultDates();
-  updateLastSyncDisplay();
-  
-  // Initialize with sample data if no employees exist
-  initializeDefaultData();
+  loadTodayWorkStatus();
   
   // Update clock every second
   setInterval(updateClock, 1000);
 }
 
-async function initializeDefaultData() {
+// Authentication functions
+async function handleLogin(event) {
+  event.preventDefault();
+  
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+  
+  setButtonLoading('loginBtn', true);
+  
   try {
-    const employees = await db.getEmployees();
-    if (employees.length === 0) {
-      // Save default employees to database
-      for (const employee of appData.employees) {
-        await db.saveEmployee(employee);
-      }
-      showNotification('Default data initialized', 'info');
+    const result = await auth.login(email, password);
+    
+    if (result.success) {
+      initializeApp();
+    } else {
+      showNotification(result.error, 'error');
     }
   } catch (error) {
-    console.error('Error initializing default data:', error);
+    showNotification('Login failed: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('loginBtn', false);
   }
 }
 
-function getCurrentActiveTab() {
-  const activeSection = document.querySelector('.section.active');
-  return activeSection ? activeSection.id : 'dashboard';
-}
-
-function setDefaultDates() {
-  const today = new Date();
-  const currentMonth = today.toISOString().slice(0, 7);
-  const todayStr = today.toISOString().slice(0, 10);
+async function handlePasswordReset(event) {
+  event.preventDefault();
   
-  const salaryPeriodInput = document.getElementById('salaryPeriod');
-  if (salaryPeriodInput) {
-    salaryPeriodInput.value = currentMonth;
-  }
+  const email = document.getElementById('resetEmail').value;
   
-  const invoiceDateInput = document.getElementById('invoiceDate');
-  if (invoiceDateInput) {
-    invoiceDateInput.value = todayStr;
-  }
+  setButtonLoading('resetBtn', true);
   
-  const dueDateInput = document.getElementById('dueDate');
-  if (dueDateInput) {
-    const dueDate = new Date(today);
-    dueDate.setDate(today.getDate() + 30);
-    dueDateInput.value = dueDate.toISOString().slice(0, 10);
-  }
-  
-  // Generate invoice number
-  const invoiceNumberInput = document.getElementById('invoiceNumber');
-  if (invoiceNumberInput) {
-    invoiceNumberInput.value = 'INV-' + Date.now();
+  try {
+    await auth.resetPassword(email);
+  } catch (error) {
+    showNotification('Password reset failed: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('resetBtn', false);
   }
 }
 
+async function handleLogout() {
+  await auth.logout();
+}
+
+function switchAuthTab(tab) {
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
+  
+  document.querySelector(`[onclick="switchAuthTab('${tab}')"]`).classList.add('active');
+  document.getElementById(`${tab}Form`).classList.add('active');
+}
+
+// Navigation and UI functions
 function setupEventListeners() {
-  // Bottom navigation click handlers
   document.querySelectorAll('.nav-item').forEach(navItem => {
     navItem.addEventListener('click', function() {
       const tabName = this.getAttribute('data-tab');
@@ -732,32 +720,12 @@ function setupEventListeners() {
     });
   });
 
-  // Modal close handlers
   document.addEventListener('click', function(e) {
     if (e.target.classList.contains('modal') && !e.target.classList.contains('modal-content')) {
       e.target.classList.add('hidden');
     }
   });
 
-  // Setup dropdown change handlers
-  const employeeSelect = document.getElementById('employeeSelect');
-  if (employeeSelect) {
-    employeeSelect.addEventListener('change', loadEmployeeDetails);
-  }
-
-  const clientSelect = document.getElementById('clientSelect');
-  if (clientSelect) {
-    clientSelect.addEventListener('change', loadClientDetails);
-  }
-
-  // Setup service select handlers for all service dropdowns
-  document.addEventListener('change', function(e) {
-    if (e.target.classList.contains('service-select')) {
-      loadServiceDetails(e.target);
-    }
-  });
-
-  // Setup calculation handlers
   const salaryInputs = ['basicSalary', 'hra', 'da', 'medicalAllowance', 'conveyanceAllowance', 'pf', 'esi', 'professionalTax', 'incomeTax'];
   salaryInputs.forEach(inputId => {
     const input = document.getElementById(inputId);
@@ -765,17 +733,15 @@ function setupEventListeners() {
       input.addEventListener('input', calculateSalary);
     }
   });
-
-  // Setup invoice calculation handlers
-  document.addEventListener('input', function(e) {
-    if (e.target.classList.contains('quantity-input') || e.target.classList.contains('rate-input')) {
-      calculateInvoice();
-    }
-  });
 }
 
-// Tab switching functionality
 function switchTab(tabName) {
+  // Check admin access
+  if (!auth.isAdmin() && ['employees', 'vendors', 'payroll'].includes(tabName)) {
+    showNotification('Access denied. Admin privileges required.', 'error');
+    return;
+  }
+
   const sections = document.querySelectorAll('.section');
   sections.forEach(section => section.classList.remove('active'));
   
@@ -787,13 +753,14 @@ function switchTab(tabName) {
   // Special initialization for specific tabs
   if (tabName === 'attendance') {
     updateAttendanceUI();
+  } else if (tabName === 'workStatus') {
+    loadTodayWorkStatus();
   } else if (tabName === 'payroll') {
     populateEmployeeSelect();
-  } else if (tabName === 'invoices') {
-    populateClientSelect();
-    populateServiceSelects();
   } else if (tabName === 'employees') {
     loadEmployees();
+  } else if (tabName === 'vendors') {
+    loadVendors();
   }
 }
 
@@ -848,6 +815,22 @@ function calculateHoursWorked(checkIn, checkOut) {
   const hours = Math.floor(diff / (1000 * 60 * 60));
   const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
   return `${hours}:${minutes.toString().padStart(2, '0')}`;
+}
+
+function setDefaultDates() {
+  const today = new Date();
+  const currentMonth = today.toISOString().slice(0, 7);
+  const todayStr = today.toISOString().slice(0, 10);
+  
+  const salaryPeriodInput = document.getElementById('salaryPeriod');
+  if (salaryPeriodInput) {
+    salaryPeriodInput.value = currentMonth;
+  }
+  
+  const workDateInput = document.getElementById('workDate');
+  if (workDateInput) {
+    workDateInput.value = todayStr;
+  }
 }
 
 // Attendance functions
@@ -928,11 +911,11 @@ async function clockOut() {
     
     const attendanceRecord = {
       date: now.toISOString().split('T')[0],
-      employeeId: currentUser.id,
-      checkIn: attendanceState.checkInTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
-      checkOut: checkOutTime.toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit', hour12: false}),
-      totalHours: totalHours,
-      location: 'Office'
+      check_in: attendanceState.checkInTime.toISOString(),
+      check_out: checkOutTime.toISOString(),
+      total_hours: totalHours,
+      location: 'Office',
+      status: 'present'
     };
     
     await db.saveAttendance(attendanceRecord);
@@ -944,6 +927,7 @@ async function clockOut() {
     saveAttendanceState();
     updateAttendanceUI();
     loadAttendanceHistory();
+    updateDashboardStats();
     
     const todayHoursElement = document.getElementById('todayHours');
     if (todayHoursElement) {
@@ -959,7 +943,10 @@ async function clockOut() {
 }
 
 function saveAttendanceState() {
-  localStorage.setItem('attendanceState', JSON.stringify({
+  const currentUser = auth.getCurrentUser();
+  const stateKey = `attendanceState_${currentUser.id}`;
+  
+  localStorage.setItem(stateKey, JSON.stringify({
     isCheckedIn: attendanceState.isCheckedIn,
     checkInTime: attendanceState.checkInTime ? attendanceState.checkInTime.toISOString() : null
   }));
@@ -967,11 +954,11 @@ function saveAttendanceState() {
 
 async function loadAttendanceHistory() {
   const historyList = document.getElementById('attendanceHistoryList');
-  
   if (!historyList) return;
   
   try {
-    const records = await db.getAttendance();
+    const currentUser = auth.getCurrentUser();
+    const records = await db.getAttendance(currentUser.id);
     
     if (records.length === 0) {
       historyList.innerHTML = '<div class="table-row"><span style="grid-column: 1 / -1; text-align: center; color: var(--color-text-secondary);">No attendance records found</span></div>';
@@ -981,9 +968,10 @@ async function loadAttendanceHistory() {
     historyList.innerHTML = records.map(record => `
       <div class="table-row">
         <span>${new Date(record.date).toLocaleDateString('en-IN')}</span>
-        <span>${record.checkIn || record.check_in}</span>
-        <span>${record.checkOut || record.check_out}</span>
-        <span>${record.totalHours || record.total_hours}</span>
+        <span>${record.check_in ? new Date(record.check_in).toLocaleTimeString('en-IN', {hour12: false, hour: '2-digit', minute: '2-digit'}) : '-'}</span>
+        <span>${record.check_out ? new Date(record.check_out).toLocaleTimeString('en-IN', {hour12: false, hour: '2-digit', minute: '2-digit'}) : '-'}</span>
+        <span>${record.total_hours || '-'}</span>
+        <span class="status-badge ${record.status === 'present' ? 'active' : 'warning'}">${record.status || 'Present'}</span>
       </div>
     `).join('');
   } catch (error) {
@@ -1004,10 +992,119 @@ async function refreshAttendanceHistory() {
   }
 }
 
-// Employee Management Functions
+// Work Status functions
+async function saveWorkStatus(event) {
+  event.preventDefault();
+  
+  setButtonLoading('saveWorkStatusBtn', true);
+  
+  try {
+    const workStatus = {
+      date: document.getElementById('workDate').value,
+      hours_worked: parseFloat(document.getElementById('hoursWorked').value),
+      project_name: document.getElementById('projectName').value,
+      tasks_completed: document.getElementById('tasksCompleted').value.split('\n').filter(task => task.trim()),
+      progress_notes: document.getElementById('progressNotes').value
+    };
+    
+    await db.saveWorkStatus(workStatus);
+    
+    showNotification('Work status saved successfully');
+    loadWorkStatusHistory();
+    updateDashboardStats();
+    
+    // Clear form
+    document.getElementById('workStatusFormElement').reset();
+    setDefaultDates();
+    
+  } catch (error) {
+    showNotification('Error saving work status: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('saveWorkStatusBtn', false);
+  }
+}
+
+async function loadTodayWorkStatus() {
+  const today = new Date().toISOString().split('T')[0];
+  
+  try {
+    const currentUser = auth.getCurrentUser();
+    const records = await db.getWorkStatus(currentUser.id);
+    const todayRecord = records.find(r => r.date === today);
+    
+    if (todayRecord) {
+      document.getElementById('workDate').value = todayRecord.date;
+      document.getElementById('hoursWorked').value = todayRecord.hours_worked;
+      document.getElementById('projectName').value = todayRecord.project_name;
+      document.getElementById('tasksCompleted').value = Array.isArray(todayRecord.tasks_completed) 
+        ? todayRecord.tasks_completed.join('\n') 
+        : todayRecord.tasks_completed;
+      document.getElementById('progressNotes').value = todayRecord.progress_notes || '';
+      
+      showNotification('Today\'s work status loaded', 'info');
+    } else {
+      setDefaultDates();
+    }
+  } catch (error) {
+    console.error('Error loading today\'s work status:', error);
+  }
+}
+
+async function loadWorkStatusHistory() {
+  const historyList = document.getElementById('workStatusHistoryList');
+  if (!historyList) return;
+  
+  try {
+    const currentUser = auth.getCurrentUser();
+    const records = await db.getWorkStatus(currentUser.id, 10);
+    
+    if (records.length === 0) {
+      historyList.innerHTML = '<div class="loading-card"><p class="loading-text">No work status records found</p></div>';
+      return;
+    }
+    
+    historyList.innerHTML = records.map(record => createWorkStatusItem(record)).join('');
+  } catch (error) {
+    console.error('Error loading work status history:', error);
+    historyList.innerHTML = '<div class="loading-card"><p class="loading-text text-error">Error loading work status records</p></div>';
+  }
+}
+
+function createWorkStatusItem(record) {
+  const tasks = Array.isArray(record.tasks_completed) ? record.tasks_completed : [record.tasks_completed];
+  
+  return `
+    <div class="work-status-item fade-in">
+      <div class="work-status-header">
+        <div class="work-status-date">${new Date(record.date).toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+        <div class="work-status-hours">⏱️ ${record.hours_worked || 0} hours</div>
+      </div>
+      <div class="work-status-project">📂 ${record.project_name}</div>
+      <div class="work-status-tasks">
+        <h5>Tasks Completed:</h5>
+        <p>${tasks.join(', ')}</p>
+      </div>
+      ${record.progress_notes ? `<div class="work-status-notes">${record.progress_notes}</div>` : ''}
+      <div class="work-status-badge ${record.status || 'pending'}">${(record.status || 'pending').toUpperCase()}</div>
+    </div>
+  `;
+}
+
+async function refreshWorkStatusHistory() {
+  setButtonLoading('refreshWorkStatusBtn', true);
+  try {
+    await loadWorkStatusHistory();
+    showNotification('Work status history refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing work status: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshWorkStatusBtn', false);
+  }
+}
+
+// Employee Management functions
 async function loadEmployees() {
   const employeeList = document.getElementById('employeeList');
-  
   if (!employeeList) return;
   
   try {
@@ -1019,28 +1116,9 @@ async function loadEmployees() {
     }
     
     employeeList.innerHTML = employees.map(employee => createEmployeeCard(employee)).join('');
-    
-    // Update total employees count
-    const totalEmployeesElement = document.getElementById('totalEmployees');
-    if (totalEmployeesElement) {
-      totalEmployeesElement.innerHTML = employees.length;
-    }
   } catch (error) {
     console.error('Error loading employees:', error);
     employeeList.innerHTML = '<div class="employee-card"><p class="text-error">Error loading employees</p></div>';
-  }
-}
-
-async function refreshEmployees() {
-  setButtonLoading('refreshEmployeesBtn', true);
-  try {
-    await loadEmployees();
-    await populateEmployeeSelect();
-    showNotification('Employees refreshed', 'success');
-  } catch (error) {
-    showNotification('Error refreshing employees: ' + error.message, 'error');
-  } finally {
-    setButtonLoading('refreshEmployeesBtn', false);
   }
 }
 
@@ -1051,11 +1129,11 @@ function createEmployeeCard(employee) {
         <div class="employee-info">
           <h4>${employee.name}</h4>
           <p>${employee.designation} • ${employee.department}</p>
-          <p class="status-badge active">Active</p>
+          <p class="status-badge ${employee.status === 'active' ? 'active' : 'inactive'}">${employee.status || 'Active'}</p>
+          <p class="status-badge ${employee.role === 'admin' ? 'warning' : 'active'}">${(employee.role || 'employee').toUpperCase()}</p>
         </div>
         <div class="employee-actions">
-          <button class="btn btn--xs btn--secondary" onclick="viewEmployee('${employee.id}')">View</button>
-          <button class="btn btn--xs btn--primary" onclick="editEmployee('${employee.id}')">Edit</button>
+          <button class="btn btn--xs btn--secondary" onclick="editEmployee('${employee.id}')">Edit</button>
           <button class="btn btn--xs btn--danger" onclick="confirmDeleteEmployee('${employee.id}')">Delete</button>
         </div>
       </div>
@@ -1075,31 +1153,27 @@ function createEmployeeCard(employee) {
           <h5>Employment Details</h5>
           <div class="detail-item">
             <span class="detail-label">Employee ID:</span>
-            <span class="detail-value">${employee.id}</span>
+            <span class="detail-value">${employee.employee_id || employee.id}</span>
           </div>
           <div class="detail-item">
             <span class="detail-label">Join Date:</span>
-            <span class="detail-value">${employee.join_date || employee.joinDate ? new Date(employee.join_date || employee.joinDate).toLocaleDateString('en-IN') : 'N/A'}</span>
+            <span class="detail-value">${employee.join_date ? new Date(employee.join_date).toLocaleDateString('en-IN') : 'N/A'}</span>
           </div>
         </div>
         <div class="detail-group">
           <h5>Salary Information</h5>
           <div class="detail-item">
             <span class="detail-label">Basic Salary:</span>
-            <span class="detail-value">₹${(employee.basic_salary || employee.basicSalary || 0).toLocaleString('en-IN')}</span>
+            <span class="detail-value">₹${(employee.basic_salary || 0).toLocaleString('en-IN')}</span>
           </div>
           <div class="detail-item">
             <span class="detail-label">Total CTC:</span>
-            <span class="detail-value">₹${((employee.basic_salary || employee.basicSalary || 0) + (employee.hra || 0) + (employee.da || 0) + (employee.medical_allowance || employee.medicalAllowance || 0) + (employee.conveyance_allowance || employee.conveyanceAllowance || 0)).toLocaleString('en-IN')}</span>
+            <span class="detail-value">₹${((employee.basic_salary || 0) + (employee.hra || 0) + (employee.da || 0) + (employee.medical_allowance || 0) + (employee.conveyance_allowance || 0)).toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>
     </div>
   `;
-}
-
-function viewEmployee(employeeId) {
-  editEmployee(employeeId);
 }
 
 function showAddEmployeeModal() {
@@ -1121,23 +1195,24 @@ async function editEmployee(employeeId) {
     document.getElementById('employeeModalTitle').textContent = 'Edit Employee';
     
     // Populate form with employee data
-    document.getElementById('empId').value = employee.id;
+    document.getElementById('empId').value = employee.employee_id || employee.id;
     document.getElementById('empName').value = employee.name;
-    document.getElementById('empDesignation').value = employee.designation;
-    document.getElementById('empDepartment').value = employee.department;
     document.getElementById('empEmail').value = employee.email;
     document.getElementById('empPhone').value = employee.phone;
-    document.getElementById('empBankAccount').value = employee.bank_account || employee.bankAccount || '';
+    document.getElementById('empDesignation').value = employee.designation;
+    document.getElementById('empDepartment').value = employee.department;
+    document.getElementById('empRole').value = employee.role || 'employee';
+    document.getElementById('empJoinDate').value = employee.join_date;
+    document.getElementById('empBankAccount').value = employee.bank_account || '';
     document.getElementById('empIfsc').value = employee.ifsc || '';
-    document.getElementById('empPan').value = employee.pan_number || employee.panNumber || '';
-    document.getElementById('empJoinDate').value = employee.join_date || employee.joinDate || '';
-    document.getElementById('empBasicSalary').value = employee.basic_salary || employee.basicSalary || '';
+    document.getElementById('empPan').value = employee.pan_number || '';
+    document.getElementById('empBasicSalary').value = employee.basic_salary || '';
     document.getElementById('empHra').value = employee.hra || '';
     document.getElementById('empDa').value = employee.da || '';
-    document.getElementById('empMedical').value = employee.medical_allowance || employee.medicalAllowance || '';
-    document.getElementById('empConveyance').value = employee.conveyance_allowance || employee.conveyanceAllowance || '';
+    document.getElementById('empMedical').value = employee.medical_allowance || '';
+    document.getElementById('empConveyance').value = employee.conveyance_allowance || '';
     document.getElementById('empAddress').value = employee.address || '';
-    document.getElementById('empEmergencyContact').value = employee.emergency_contact || employee.emergencyContact || '';
+    document.getElementById('empEmergencyContact').value = employee.emergency_contact || '';
     
     document.getElementById('employeeModal').classList.remove('hidden');
   } catch (error) {
@@ -1156,23 +1231,26 @@ async function saveEmployee() {
   
   try {
     const employeeData = {
-      id: document.getElementById('empId').value,
+      id: editingEmployeeId || generateId(),
+      employee_id: document.getElementById('empId').value,
       name: document.getElementById('empName').value,
-      designation: document.getElementById('empDesignation').value,
-      department: document.getElementById('empDepartment').value,
       email: document.getElementById('empEmail').value,
       phone: document.getElementById('empPhone').value,
+      designation: document.getElementById('empDesignation').value,
+      department: document.getElementById('empDepartment').value,
+      role: document.getElementById('empRole').value,
+      join_date: document.getElementById('empJoinDate').value,
       bank_account: document.getElementById('empBankAccount').value,
       ifsc: document.getElementById('empIfsc').value,
       pan_number: document.getElementById('empPan').value,
-      join_date: document.getElementById('empJoinDate').value,
       basic_salary: parseFloat(document.getElementById('empBasicSalary').value) || 0,
       hra: parseFloat(document.getElementById('empHra').value) || 0,
       da: parseFloat(document.getElementById('empDa').value) || 0,
       medical_allowance: parseFloat(document.getElementById('empMedical').value) || 0,
       conveyance_allowance: parseFloat(document.getElementById('empConveyance').value) || 0,
       address: document.getElementById('empAddress').value,
-      emergency_contact: document.getElementById('empEmergencyContact').value
+      emergency_contact: document.getElementById('empEmergencyContact').value,
+      status: 'active'
     };
     
     await db.saveEmployee(employeeData);
@@ -1180,6 +1258,7 @@ async function saveEmployee() {
     closeModal('employeeModal');
     loadEmployees();
     populateEmployeeSelect();
+    updateDashboardStats();
     
     showNotification(editingEmployeeId ? 'Employee updated successfully' : 'Employee added successfully');
   } catch (error) {
@@ -1208,6 +1287,7 @@ async function deleteEmployee(employeeId) {
     await db.deleteEmployee(employeeId);
     loadEmployees();
     populateEmployeeSelect();
+    updateDashboardStats();
     showNotification('Employee deleted successfully');
   } catch (error) {
     showNotification('Error deleting employee: ' + error.message, 'error');
@@ -1236,11 +1316,244 @@ function filterEmployees() {
   });
 }
 
+async function refreshEmployees() {
+  setButtonLoading('refreshEmployeesBtn', true);
+  try {
+    await loadEmployees();
+    await populateEmployeeSelect();
+    showNotification('Employees refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing employees: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshEmployeesBtn', false);
+  }
+}
+
 function generateEmployeeId() {
   return 'EMP' + String(Date.now()).slice(-6);
 }
 
-// Employee and dropdown functions
+function generateId() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Vendor Management functions
+async function loadVendors() {
+  const vendorList = document.getElementById('vendorList');
+  if (!vendorList) return;
+  
+  try {
+    const vendors = await db.getVendors();
+    
+    if (vendors.length === 0) {
+      vendorList.innerHTML = '<div class="vendor-card"><p>No vendors found. Click "Add New Vendor" to get started.</p></div>';
+      return;
+    }
+    
+    vendorList.innerHTML = vendors.map(vendor => createVendorCard(vendor)).join('');
+  } catch (error) {
+    console.error('Error loading vendors:', error);
+    vendorList.innerHTML = '<div class="vendor-card"><p class="text-error">Error loading vendors</p></div>';
+  }
+}
+
+function createVendorCard(vendor) {
+  return `
+    <div class="vendor-card fade-in">
+      <div class="vendor-header">
+        <div class="vendor-info">
+          <h4>${vendor.name}</h4>
+          <p>${vendor.contact_person} • ${vendor.service_category}</p>
+          <p class="status-badge ${vendor.status === 'active' ? 'active' : 'inactive'}">${vendor.status || 'Active'}</p>
+        </div>
+        <div class="vendor-actions">
+          <button class="btn btn--xs btn--secondary" onclick="editVendor('${vendor.id}')">Edit</button>
+          <button class="btn btn--xs btn--danger" onclick="confirmDeleteVendor('${vendor.id}')">Delete</button>
+        </div>
+      </div>
+      <div class="vendor-details">
+        <div class="detail-group">
+          <h5>Contact Information</h5>
+          <div class="detail-item">
+            <span class="detail-label">Email:</span>
+            <span class="detail-value">${vendor.email}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Phone:</span>
+            <span class="detail-value">${vendor.phone}</span>
+          </div>
+        </div>
+        <div class="detail-group">
+          <h5>Business Details</h5>
+          <div class="detail-item">
+            <span class="detail-label">Vendor ID:</span>
+            <span class="detail-value">${vendor.vendor_id || vendor.id}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Payment Terms:</span>
+            <span class="detail-value">${vendor.payment_terms}</span>
+          </div>
+        </div>
+        <div class="detail-group">
+          <h5>Address</h5>
+          <div class="detail-item">
+            <span class="detail-value">${vendor.address}</span>
+          </div>
+          ${vendor.gst_number ? `
+          <div class="detail-item">
+            <span class="detail-label">GST:</span>
+            <span class="detail-value">${vendor.gst_number}</span>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function showAddVendorModal() {
+  editingVendorId = null;
+  document.getElementById('vendorModalTitle').textContent = 'Add New Vendor';
+  document.getElementById('vendorForm').reset();
+  document.getElementById('vendorId').value = generateVendorId();
+  document.getElementById('vendorModal').classList.remove('hidden');
+}
+
+async function editVendor(vendorId) {
+  try {
+    const vendors = await db.getVendors();
+    const vendor = vendors.find(v => v.id === vendorId);
+    
+    if (!vendor) return;
+    
+    editingVendorId = vendorId;
+    document.getElementById('vendorModalTitle').textContent = 'Edit Vendor';
+    
+    // Populate form with vendor data
+    document.getElementById('vendorId').value = vendor.vendor_id || vendor.id;
+    document.getElementById('vendorName').value = vendor.name;
+    document.getElementById('vendorContactPerson').value = vendor.contact_person;
+    document.getElementById('vendorEmail').value = vendor.email;
+    document.getElementById('vendorPhone').value = vendor.phone;
+    document.getElementById('vendorGst').value = vendor.gst_number || '';
+    document.getElementById('vendorAddress').value = vendor.address;
+    document.getElementById('vendorCategory').value = vendor.service_category;
+    document.getElementById('vendorPaymentTerms').value = vendor.payment_terms;
+    document.getElementById('vendorServiceDesc').value = vendor.service_description || '';
+    
+    document.getElementById('vendorModal').classList.remove('hidden');
+  } catch (error) {
+    showNotification('Error loading vendor details: ' + error.message, 'error');
+  }
+}
+
+async function saveVendor() {
+  const form = document.getElementById('vendorForm');
+  if (!form.checkValidity()) {
+    form.reportValidity();
+    return;
+  }
+  
+  setButtonLoading('saveVendorBtn', true);
+  
+  try {
+    const vendorData = {
+      id: editingVendorId || generateId(),
+      vendor_id: document.getElementById('vendorId').value,
+      name: document.getElementById('vendorName').value,
+      contact_person: document.getElementById('vendorContactPerson').value,
+      email: document.getElementById('vendorEmail').value,
+      phone: document.getElementById('vendorPhone').value,
+      gst_number: document.getElementById('vendorGst').value,
+      address: document.getElementById('vendorAddress').value,
+      service_category: document.getElementById('vendorCategory').value,
+      payment_terms: document.getElementById('vendorPaymentTerms').value,
+      service_description: document.getElementById('vendorServiceDesc').value,
+      status: 'active'
+    };
+    
+    await db.saveVendor(vendorData);
+    
+    closeModal('vendorModal');
+    loadVendors();
+    updateDashboardStats();
+    
+    showNotification(editingVendorId ? 'Vendor updated successfully' : 'Vendor added successfully');
+  } catch (error) {
+    showNotification('Error saving vendor: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('saveVendorBtn', false);
+  }
+}
+
+function confirmDeleteVendor(vendorId) {
+  db.getVendors().then(vendors => {
+    const vendor = vendors.find(v => v.id === vendorId);
+    
+    if (!vendor) return;
+    
+    showConfirmModal(
+      'Delete Vendor',
+      `Are you sure you want to delete ${vendor.name}? This action cannot be undone.`,
+      () => deleteVendor(vendorId)
+    );
+  });
+}
+
+async function deleteVendor(vendorId) {
+  try {
+    await db.deleteVendor(vendorId);
+    loadVendors();
+    updateDashboardStats();
+    showNotification('Vendor deleted successfully');
+  } catch (error) {
+    showNotification('Error deleting vendor: ' + error.message, 'error');
+  }
+}
+
+function filterVendors() {
+  const searchTerm = document.getElementById('vendorSearch').value.toLowerCase();
+  const categoryFilter = document.getElementById('categoryFilter').value;
+  
+  const vendorCards = document.querySelectorAll('.vendor-card');
+  
+  vendorCards.forEach(card => {
+    const name = card.querySelector('h4')?.textContent.toLowerCase() || '';
+    const contactPerson = card.querySelector('p')?.textContent.toLowerCase() || '';
+    const category = card.querySelector('p')?.textContent.split('•')[1]?.trim();
+    
+    const matchesSearch = name.includes(searchTerm) || contactPerson.includes(searchTerm);
+    const matchesCategory = !categoryFilter || category === categoryFilter;
+    
+    if (matchesSearch && matchesCategory) {
+      card.style.display = 'block';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+async function refreshVendors() {
+  setButtonLoading('refreshVendorsBtn', true);
+  try {
+    await loadVendors();
+    showNotification('Vendors refreshed', 'success');
+  } catch (error) {
+    showNotification('Error refreshing vendors: ' + error.message, 'error');
+  } finally {
+    setButtonLoading('refreshVendorsBtn', false);
+  }
+}
+
+function generateVendorId() {
+  return 'VEN' + String(Date.now()).slice(-6);
+}
+
+// Payroll functions
 async function populateEmployeeSelect() {
   const select = document.getElementById('employeeSelect');
   if (!select) return;
@@ -1253,7 +1566,7 @@ async function populateEmployeeSelect() {
     employees.forEach(employee => {
       const option = document.createElement('option');
       option.value = employee.id;
-      option.textContent = `${employee.name} (${employee.id})`;
+      option.textContent = `${employee.name} (${employee.employee_id || employee.id})`;
       select.appendChild(option);
     });
   } catch (error) {
@@ -1270,16 +1583,16 @@ async function loadEmployeeDetails() {
     const employee = employees.find(emp => emp.id === employeeId);
     
     if (employee) {
-      document.getElementById('employeeId').value = employee.id;
+      document.getElementById('employeeId').value = employee.employee_id || employee.id;
       document.getElementById('designation').value = employee.designation;
-      document.getElementById('basicSalary').value = employee.basic_salary || employee.basicSalary || 0;
+      document.getElementById('basicSalary').value = employee.basic_salary || 0;
       document.getElementById('hra').value = employee.hra || 0;
       document.getElementById('da').value = employee.da || 0;
-      document.getElementById('medicalAllowance').value = employee.medical_allowance || employee.medicalAllowance || 0;
-      document.getElementById('conveyanceAllowance').value = employee.conveyance_allowance || employee.conveyanceAllowance || 0;
+      document.getElementById('medicalAllowance').value = employee.medical_allowance || 0;
+      document.getElementById('conveyanceAllowance').value = employee.conveyance_allowance || 0;
       
       // Calculate deductions
-      const basicSalary = employee.basic_salary || employee.basicSalary || 0;
+      const basicSalary = employee.basic_salary || 0;
       const grossForPF = basicSalary + (employee.hra || 0);
       
       document.getElementById('pf').value = Math.round(basicSalary * (appData.deductions.pfRate / 100));
@@ -1302,106 +1615,6 @@ async function loadEmployeeDetails() {
   }
 }
 
-async function populateClientSelect() {
-  const select = document.getElementById('clientSelect');
-  if (!select) return;
-  
-  try {
-    const clients = await db.getClients();
-    
-    select.innerHTML = '<option value="">Select Client</option>';
-    
-    clients.forEach(client => {
-      const option = document.createElement('option');
-      option.value = client.id;
-      option.textContent = client.name;
-      select.appendChild(option);
-    });
-  } catch (error) {
-    select.innerHTML = '<option value="">Error loading clients</option>';
-  }
-}
-
-async function loadClientDetails() {
-  const clientSelect = document.getElementById('clientSelect');
-  const clientId = clientSelect.value;
-  
-  try {
-    const clients = await db.getClients();
-    const client = clients.find(c => c.id === clientId);
-    
-    if (client) {
-      document.getElementById('clientName').value = client.name;
-      document.getElementById('clientGst').value = client.gst;
-      document.getElementById('clientAddress').value = client.address;
-    } else {
-      // Clear fields if no client selected
-      document.getElementById('clientName').value = '';
-      document.getElementById('clientGst').value = '';
-      document.getElementById('clientAddress').value = '';
-    }
-  } catch (error) {
-    showNotification('Error loading client details: ' + error.message, 'error');
-  }
-}
-
-async function refreshClients() {
-  setButtonLoading('refreshClientsBtn', true);
-  try {
-    await populateClientSelect();
-    showNotification('Clients refreshed', 'success');
-  } catch (error) {
-    showNotification('Error refreshing clients: ' + error.message, 'error');
-  } finally {
-    setButtonLoading('refreshClientsBtn', false);
-  }
-}
-
-async function refreshInvoices() {
-  setButtonLoading('refreshInvoicesBtn', true);
-  try {
-    await updateDashboardStats();
-    showNotification('Invoices refreshed', 'success');
-  } catch (error) {
-    showNotification('Error refreshing invoices: ' + error.message, 'error');
-  } finally {
-    setButtonLoading('refreshInvoicesBtn', false);
-  }
-}
-
-function populateServiceSelects() {
-  const selects = document.querySelectorAll('.service-select');
-  
-  selects.forEach(select => {
-    select.innerHTML = '<option value="">Select Service</option>';
-    
-    appData.services.forEach(service => {
-      const option = document.createElement('option');
-      option.value = service.id;
-      option.textContent = service.name;
-      select.appendChild(option);
-    });
-  });
-}
-
-function loadServiceDetails(selectElement) {
-  const serviceId = selectElement.value;
-  const service = appData.services.find(s => s.id === serviceId);
-  const item = selectElement.closest('.invoice-item');
-  
-  if (service && item) {
-    item.querySelector('.rate-input').value = service.rate;
-    item.querySelector('.description-input').value = service.description;
-    calculateInvoice();
-  } else if (item) {
-    // Clear fields if no service selected
-    item.querySelector('.rate-input').value = '';
-    item.querySelector('.description-input').value = '';
-    calculateInvoice();
-  }
-}
-
-// Salary calculation functions
 function calculateSalary() {
   const basicSalary = parseFloat(document.getElementById('basicSalary').value) || 0;
   const hra = parseFloat(document.getElementById('hra').value) || 0;
@@ -1480,7 +1693,7 @@ function downloadSalaryPDF() {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
       
-      // Company header
+      // Company header with logo
       doc.setFontSize(20);
       doc.setFont('helvetica', 'bold');
       doc.text(appData.company.name, 105, 20, { align: 'center' });
@@ -1502,9 +1715,9 @@ function downloadSalaryPDF() {
       
       // Employee details table
       const empDetails = [
-        ['Employee ID', currentSalaryData.employee.id, 'Name', currentSalaryData.employee.name],
+        ['Employee ID', currentSalaryData.employee.employee_id || currentSalaryData.employee.id, 'Name', currentSalaryData.employee.name],
         ['Designation', currentSalaryData.employee.designation, 'Department', currentSalaryData.employee.department],
-        ['PAN Number', currentSalaryData.employee.pan_number || currentSalaryData.employee.panNumber || 'N/A', 'Bank A/C', currentSalaryData.employee.bank_account || currentSalaryData.employee.bankAccount || 'N/A']
+        ['PAN Number', currentSalaryData.employee.pan_number || 'N/A', 'Bank A/C', currentSalaryData.employee.bank_account || 'N/A']
       ];
       
       doc.autoTable({
@@ -1592,12 +1805,12 @@ function generateSalarySlipHTML(data, gross, deductions, net) {
       <div class="document-section">
         <h3>Employee Details</h3>
         <table class="document-table">
-          <tr><td><strong>Employee ID:</strong></td><td>${data.employee.id}</td></tr>
+          <tr><td><strong>Employee ID:</strong></td><td>${data.employee.employee_id || data.employee.id}</td></tr>
           <tr><td><strong>Name:</strong></td><td>${data.employee.name}</td></tr>
           <tr><td><strong>Designation:</strong></td><td>${data.employee.designation}</td></tr>
           <tr><td><strong>Department:</strong></td><td>${data.employee.department}</td></tr>
-          <tr><td><strong>PAN:</strong></td><td>${data.employee.pan_number || data.employee.panNumber || 'N/A'}</td></tr>
-          <tr><td><strong>Bank A/C:</strong></td><td>${data.employee.bank_account || data.employee.bankAccount || 'N/A'}</td></tr>
+          <tr><td><strong>PAN:</strong></td><td>${data.employee.pan_number || 'N/A'}</td></tr>
+          <tr><td><strong>Bank A/C:</strong></td><td>${data.employee.bank_account || 'N/A'}</td></tr>
         </table>
       </div>
       
@@ -1666,483 +1879,53 @@ function generateSalarySlipHTML(data, gross, deductions, net) {
   `;
 }
 
-// Invoice functions
-function addInvoiceItem() {
-  const itemsContainer = document.getElementById('invoiceItems');
-  const newItem = document.querySelector('.invoice-item').cloneNode(true);
-  
-  // Clear values
-  newItem.querySelectorAll('input, select').forEach(input => {
-    if (input.type !== 'number' || input.classList.contains('quantity-input')) {
-      input.value = input.classList.contains('quantity-input') ? 1 : '';
-    } else {
-      input.value = '';
-    }
-  });
-  
-  // Add remove button
-  const removeBtn = document.createElement('button');
-  removeBtn.className = 'remove-item';
-  removeBtn.innerHTML = '×';
-  removeBtn.onclick = function() {
-    newItem.remove();
-    calculateInvoice();
-  };
-  newItem.appendChild(removeBtn);
-  
-  itemsContainer.appendChild(newItem);
-  
-  // Populate service select for new item
-  const serviceSelect = newItem.querySelector('.service-select');
-  serviceSelect.innerHTML = '<option value="">Select Service</option>';
-  appData.services.forEach(service => {
-    const option = document.createElement('option');
-    option.value = service.id;
-    option.textContent = service.name;
-    serviceSelect.appendChild(option);
-  });
-}
-
-function calculateInvoice() {
-  const items = document.querySelectorAll('.invoice-item');
-  let subtotal = 0;
-  
-  items.forEach(item => {
-    const quantity = parseFloat(item.querySelector('.quantity-input').value) || 0;
-    const rate = parseFloat(item.querySelector('.rate-input').value) || 0;
-    const amount = quantity * rate;
-    
-    item.querySelector('.amount-input').value = amount;
-    subtotal += amount;
-  });
-  
-  const cgst = subtotal * (appData.taxRates.cgst / 100);
-  const sgst = subtotal * (appData.taxRates.sgst / 100);
-  const total = subtotal + cgst + sgst;
-  
-  const subtotalElement = document.getElementById('subtotal');
-  const cgstElement = document.getElementById('cgst');
-  const sgstElement = document.getElementById('sgst');
-  const totalElement = document.getElementById('totalAmount');
-  
-  if (subtotalElement) subtotalElement.textContent = `₹${subtotal.toLocaleString('en-IN')}`;
-  if (cgstElement) cgstElement.textContent = `₹${cgst.toLocaleString('en-IN')}`;
-  if (sgstElement) sgstElement.textContent = `₹${sgst.toLocaleString('en-IN')}`;
-  if (totalElement) totalElement.textContent = `₹${total.toLocaleString('en-IN')}`;
-}
-
-function previewInvoice() {
-  const clientName = document.getElementById('clientName').value;
-  if (!clientName) {
-    showNotification('Please select a client', 'error');
-    return;
-  }
-  
-  currentInvoiceData = {
-    invoiceNumber: document.getElementById('invoiceNumber').value,
-    date: document.getElementById('invoiceDate').value,
-    dueDate: document.getElementById('dueDate').value,
-    client: {
-      name: document.getElementById('clientName').value,
-      address: document.getElementById('clientAddress').value,
-      gst: document.getElementById('clientGst').value
-    },
-    items: [],
-    subtotal: 0,
-    cgst: 0,
-    sgst: 0,
-    total: 0
-  };
-  
-  // Collect items
-  document.querySelectorAll('.invoice-item').forEach(item => {
-    const description = item.querySelector('.description-input').value;
-    const quantity = parseFloat(item.querySelector('.quantity-input').value) || 0;
-    const rate = parseFloat(item.querySelector('.rate-input').value) || 0;
-    const amount = quantity * rate;
-    
-    if (description && quantity && rate) {
-      currentInvoiceData.items.push({
-        description,
-        quantity,
-        rate,
-        amount
-      });
-      currentInvoiceData.subtotal += amount;
-    }
-  });
-  
-  if (currentInvoiceData.items.length === 0) {
-    showNotification('Please add at least one item to the invoice', 'error');
-    return;
-  }
-  
-  currentInvoiceData.cgst = currentInvoiceData.subtotal * (appData.taxRates.cgst / 100);
-  currentInvoiceData.sgst = currentInvoiceData.subtotal * (appData.taxRates.sgst / 100);
-  currentInvoiceData.total = currentInvoiceData.subtotal + currentInvoiceData.cgst + currentInvoiceData.sgst;
-  
-  const invoiceHTML = generateInvoiceHTML(currentInvoiceData);
-  showDocumentPreview('Invoice Preview', invoiceHTML);
-  document.getElementById('downloadInvoiceBtn').disabled = false;
-}
-
-async function saveInvoice() {
-  if (!currentInvoiceData) {
-    previewInvoice();
-    if (!currentInvoiceData) return;
-  }
-  
-  setButtonLoading('saveInvoiceBtn', true);
-  
+// Dashboard and statistics
+async function updateDashboardStats() {
   try {
-    await db.saveInvoice({
-      ...currentInvoiceData,
-      status: 'saved',
-      created_at: new Date().toISOString()
+    const currentUser = auth.getCurrentUser();
+    
+    // Update attendance stats
+    const records = await db.getAttendance(currentUser.id);
+    const thisMonth = records.filter(record => {
+      const recordDate = new Date(record.date);
+      const now = new Date();
+      return recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear();
     });
     
-    showNotification('Invoice saved successfully');
+    const presentDaysElement = document.getElementById('presentDays');
+    const absentDaysElement = document.getElementById('absentDays');
     
-    // Reset form
-    document.getElementById('invoiceNumber').value = 'INV-' + Date.now();
-    setDefaultDates();
-    
-  } catch (error) {
-    showNotification('Error saving invoice: ' + error.message, 'error');
-  } finally {
-    setButtonLoading('saveInvoiceBtn', false);
-  }
-}
+    if (presentDaysElement) presentDaysElement.innerHTML = thisMonth.length;
+    if (absentDaysElement) absentDaysElement.innerHTML = Math.max(0, 22 - thisMonth.length);
 
-function downloadInvoicePDF() {
-  if (!currentInvoiceData) {
-    showNotification('Please preview the invoice first', 'error');
-    return;
-  }
-  
-  showLoading('Generating invoice PDF...');
-  
-  setTimeout(() => {
-    try {
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      
-      // Company header
-      doc.setFontSize(20);
-      doc.setFont('helvetica', 'bold');
-      doc.text(appData.company.name, 20, 20);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text(appData.company.address, 20, 30);
-      doc.text(`Phone: ${appData.company.phone}`, 20, 35);
-      doc.text(`Email: ${appData.company.email}`, 20, 40);
-      doc.text(`GST: ${appData.company.gst}`, 20, 45);
-      
-      // Invoice title and details
-      doc.setFontSize(24);
-      doc.setFont('helvetica', 'bold');
-      doc.text('INVOICE', 150, 30);
-      
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Invoice No: ${currentInvoiceData.invoiceNumber}`, 150, 40);
-      doc.text(`Date: ${new Date(currentInvoiceData.date).toLocaleDateString('en-IN')}`, 150, 45);
-      doc.text(`Due Date: ${new Date(currentInvoiceData.dueDate).toLocaleDateString('en-IN')}`, 150, 50);
-      
-      // Client details
-      doc.setFont('helvetica', 'bold');
-      doc.text('Bill To:', 20, 65);
-      doc.setFont('helvetica', 'normal');
-      doc.text(currentInvoiceData.client.name, 20, 75);
-      const addressLines = doc.splitTextToSize(currentInvoiceData.client.address, 100);
-      doc.text(addressLines, 20, 80);
-      doc.text(`GST: ${currentInvoiceData.client.gst}`, 20, 80 + (addressLines.length * 5) + 5);
-      
-      // Items table
-      const tableData = currentInvoiceData.items.map(item => [
-        item.description,
-        item.quantity.toString(),
-        `₹${item.rate.toLocaleString('en-IN')}`,
-        `₹${item.amount.toLocaleString('en-IN')}`
-      ]);
-      
-      // Add summary rows
-      tableData.push(
-        ['', '', 'Subtotal:', `₹${currentInvoiceData.subtotal.toLocaleString('en-IN')}`],
-        ['', '', `CGST (${appData.taxRates.cgst}%):`, `₹${currentInvoiceData.cgst.toLocaleString('en-IN')}`],
-        ['', '', `SGST (${appData.taxRates.sgst}%):`, `₹${currentInvoiceData.sgst.toLocaleString('en-IN')}`],
-        ['', '', 'Total Amount:', `₹${currentInvoiceData.total.toLocaleString('en-IN')}`]
-      );
-      
-      doc.autoTable({
-        startY: 110,
-        head: [['Description', 'Qty', 'Rate (₹)', 'Amount (₹)']],
-        body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-        bodyStyles: { fontSize: 10 },
-        columnStyles: { 
-          1: { halign: 'center' }, 
-          2: { halign: 'right' }, 
-          3: { halign: 'right' } 
-        },
-        margin: { left: 20, right: 20 },
-        didParseCell: function (data) {
-          if (data.row.index >= tableData.length - 4) {
-            data.cell.styles.fontStyle = 'bold';
-            if (data.row.index === tableData.length - 1) {
-              data.cell.styles.fillColor = [240, 240, 240];
-              data.cell.styles.fontSize = 12;
-            }
-          }
-        }
-      });
-      
-      // Terms and conditions
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Terms & Conditions:', 20, doc.lastAutoTable.finalY + 20);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      const terms = [
-        '• Payment is due within 30 days of invoice date',
-        '• Late payments may incur additional charges',
-        '• All disputes must be reported within 7 days'
-      ];
-      
-      terms.forEach((term, index) => {
-        doc.text(term, 20, doc.lastAutoTable.finalY + 30 + (index * 5));
-      });
-      
-      // Signature
-      doc.text('Authorized Signatory', 150, doc.internal.pageSize.height - 20);
-      doc.line(140, doc.internal.pageSize.height - 25, 190, doc.internal.pageSize.height - 25);
-      
-      // Save PDF
-      const fileName = `invoice-${currentInvoiceData.invoiceNumber}.pdf`;
-      doc.save(fileName);
-      
-      hideLoading();
-      showNotification('Invoice PDF downloaded successfully');
-      
-    } catch (error) {
-      hideLoading();
-      showNotification('Error generating PDF: ' + error.message, 'error');
-    }
-  }, 1000);
-}
-
-function generateInvoiceHTML(data) {
-  return `
-    <div class="document-preview">
-      <div class="document-header">
-        <h1>${appData.company.name}</h1>
-        <div class="company-info">
-          <p>${appData.company.address}</p>
-          <p>Phone: ${appData.company.phone} | Email: ${appData.company.email}</p>
-          <p>GST: ${appData.company.gst}</p>
-        </div>
-      </div>
-      
-      <div style="display: flex; justify-content: space-between; margin-bottom: 32px;">
-        <div>
-          <h2>INVOICE</h2>
-          <p><strong>Invoice No:</strong> ${data.invoiceNumber}</p>
-          <p><strong>Date:</strong> ${new Date(data.date).toLocaleDateString('en-IN')}</p>
-          <p><strong>Due Date:</strong> ${new Date(data.dueDate).toLocaleDateString('en-IN')}</p>
-        </div>
-        <div>
-          <h3>Bill To:</h3>
-          <p><strong>${data.client.name}</strong></p>
-          <p>${data.client.address}</p>
-          <p>GST: ${data.client.gst}</p>
-        </div>
-      </div>
-      
-      <div class="document-section">
-        <table class="document-table">
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Quantity</th>
-              <th>Rate (₹)</th>
-              <th>Amount (₹)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${data.items.map(item => `
-              <tr>
-                <td>${item.description}</td>
-                <td>${item.quantity}</td>
-                <td>${item.rate.toLocaleString('en-IN')}</td>
-                <td>${item.amount.toLocaleString('en-IN')}</td>
-              </tr>
-            `).join('')}
-            <tr style="border-top: 2px solid #ddd;">
-              <td colspan="3" style="text-align: right; font-weight: bold;">Subtotal:</td>
-              <td style="font-weight: bold;">₹${data.subtotal.toLocaleString('en-IN')}</td>
-            </tr>
-            <tr>
-              <td colspan="3" style="text-align: right;">CGST (${appData.taxRates.cgst}%):</td>
-              <td>₹${data.cgst.toLocaleString('en-IN')}</td>
-            </tr>
-            <tr>
-              <td colspan="3" style="text-align: right;">SGST (${appData.taxRates.sgst}%):</td>
-              <td>₹${data.sgst.toLocaleString('en-IN')}</td>
-            </tr>
-            <tr style="background: #f8f9fa; font-weight: bold; font-size: 16px;">
-              <td colspan="3" style="text-align: right;">Total Amount:</td>
-              <td>₹${data.total.toLocaleString('en-IN')}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      
-      <div style="margin-top: 48px;">
-        <p><strong>Terms & Conditions:</strong></p>
-        <ul style="font-size: 12px; color: #666;">
-          <li>Payment is due within 30 days of invoice date</li>
-          <li>Late payments may incur additional charges</li>
-          <li>All disputes must be reported within 7 days</li>
-        </ul>
-      </div>
-      
-      <div style="margin-top: 48px; text-align: right;">
-        <p>____________________</p>
-        <p>Authorized Signatory</p>
-      </div>
-    </div>
-  `;
-}
-
-// Settings functions
-function uploadLogo() {
-  const file = document.getElementById('logoUpload').files[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      const logoPreview = document.getElementById('logoPreview');
-      logoPreview.innerHTML = `<img src="${e.target.result}" alt="Company Logo">`;
-      
-      document.getElementById('companyLogo').src = e.target.result;
-      
-      localStorage.setItem('companyLogo', e.target.result);
-      showNotification('Logo uploaded successfully');
-    };
-    reader.readAsDataURL(file);
-  }
-}
-
-async function saveSettings() {
-  setButtonLoading('saveSettingsBtn', true);
-  
-  try {
-    const settings = {
-      companyName: document.getElementById('companyName').value,
-      companyGst: document.getElementById('companyGst').value,
-      companyAddress: document.getElementById('companyAddress').value,
-      invoiceTemplate: document.getElementById('invoiceTemplate')?.value || 'template1',
-      salaryTemplate: document.getElementById('salaryTemplate')?.value || 'salary1'
-    };
-    
-    localStorage.setItem('companySettings', JSON.stringify(settings));
-    
-    // Update company name in header
-    const companyNameElement = document.querySelector('.company-name');
-    if (companyNameElement) {
-      companyNameElement.textContent = settings.companyName;
-    }
-    
-    showNotification('Settings saved successfully');
-  } catch (error) {
-    showNotification('Error saving settings: ' + error.message, 'error');
-  } finally {
-    setButtonLoading('saveSettingsBtn', false);
-  }
-}
-
-async function syncAllData() {
-  await db.syncAllData();
-}
-
-function exportData() {
-  try {
-    const data = {
-      attendance: JSON.parse(localStorage.getItem('attendanceRecords') || '[]'),
-      employees: JSON.parse(localStorage.getItem('employees') || '[]'),
-      invoices: JSON.parse(localStorage.getItem('invoices') || '[]'),
-      settings: JSON.parse(localStorage.getItem('companySettings') || '{}'),
-      exportDate: new Date().toISOString(),
-      version: '1.0'
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rk-infotech-data-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    showNotification('Data exported successfully');
-  } catch (error) {
-    showNotification('Error exporting data: ' + error.message, 'error');
-  }
-}
-
-function clearLocalData() {
-  showConfirmModal(
-    'Clear Local Cache',
-    'Are you sure you want to clear all local data cache? This will not affect data in the cloud database.',
-    () => {
-      const keysToKeep = ['companyLogo', 'companySettings'];
-      const allKeys = Object.keys(localStorage);
-      
-      allKeys.forEach(key => {
-        if (!keysToKeep.includes(key)) {
-          localStorage.removeItem(key);
-        }
-      });
-      
-      showNotification('Local cache cleared successfully');
-      location.reload();
-    }
-  );
-}
-
-function resetDatabase() {
-  showConfirmModal(
-    'Reset Database',
-    'Are you sure you want to reset the entire database? This will permanently delete all data and cannot be undone.',
-    async () => {
-      if (!db.isConnected) {
-        showNotification('Database not connected', 'error');
-        return;
+    // Update employees count (admin only)
+    if (auth.isAdmin()) {
+      const employees = await db.getEmployees();
+      const totalEmployeesElement = document.getElementById('totalEmployees');
+      if (totalEmployeesElement) {
+        totalEmployeesElement.innerHTML = employees.length;
       }
-
-      try {
-        // This would require database admin permissions
-        showNotification('Database reset requires manual action in Supabase dashboard', 'warning');
-      } catch (error) {
-        showNotification('Error resetting database: ' + error.message, 'error');
+      
+      // Update vendors count
+      const vendors = await db.getVendors();
+      const totalVendorsElement = document.getElementById('totalVendors');
+      if (totalVendorsElement) {
+        totalVendorsElement.innerHTML = vendors.length;
       }
     }
-  );
-}
 
-function updateLastSyncDisplay() {
-  const lastSync = localStorage.getItem('lastSync');
-  const lastSyncElement = document.getElementById('lastSync');
-  
-  if (lastSyncElement) {
-    if (lastSync) {
-      const syncDate = new Date(lastSync);
-      lastSyncElement.textContent = syncDate.toLocaleString('en-IN');
-    } else {
-      lastSyncElement.textContent = 'Never';
+    // Update work status
+    const workStatusRecords = await db.getWorkStatus(currentUser.id);
+    const todayWorkStatusElement = document.getElementById('todayWorkStatus');
+    const today = new Date().toISOString().split('T')[0];
+    const todayStatus = workStatusRecords.find(r => r.date === today);
+    
+    if (todayWorkStatusElement) {
+      todayWorkStatusElement.innerHTML = todayStatus ? 'Submitted' : 'Pending';
     }
+
+  } catch (error) {
+    console.error('Error updating dashboard stats:', error);
   }
 }
 
@@ -2206,8 +1989,7 @@ function printDocument() {
 
 // Utility functions
 function showNotification(message, type = 'success') {
-  const container = document.getElementById('notificationContainer');
-  if (!container) return;
+  const container = document.getElementById('notificationContainer') || createNotificationContainer();
 
   const notification = document.createElement('div');
   notification.className = `notification ${type}`;
@@ -2229,6 +2011,14 @@ function showNotification(message, type = 'success') {
   }, type === 'error' ? 5000 : 3000);
 }
 
+function createNotificationContainer() {
+  const container = document.createElement('div');
+  container.id = 'notificationContainer';
+  container.className = 'notification-container';
+  document.body.appendChild(container);
+  return container;
+}
+
 function setButtonLoading(buttonId, loading) {
   const button = document.getElementById(buttonId);
   if (!button) return;
@@ -2245,53 +2035,9 @@ function setButtonLoading(buttonId, loading) {
   }
 }
 
-async function updateDashboardStats() {
-  try {
-    // Update attendance stats
-    const records = await db.getAttendance();
-    const thisMonth = records.filter(record => {
-      const recordDate = new Date(record.date);
-      const now = new Date();
-      return recordDate.getMonth() === now.getMonth() && recordDate.getFullYear() === now.getFullYear();
-    });
-    
-    const presentDaysElement = document.getElementById('presentDays');
-    const absentDaysElement = document.getElementById('absentDays');
-    
-    if (presentDaysElement) presentDaysElement.innerHTML = thisMonth.length;
-    if (absentDaysElement) absentDaysElement.innerHTML = Math.max(0, 22 - thisMonth.length);
-
-    // Update employees count
-    const employees = await db.getEmployees();
-    const totalEmployeesElement = document.getElementById('totalEmployees');
-    if (totalEmployeesElement) {
-      totalEmployeesElement.innerHTML = employees.length;
-    }
-
-    // Update pending salaries (mock data)
-    const pendingSalariesElement = document.getElementById('pendingSalaries');
-    if (pendingSalariesElement) {
-      pendingSalariesElement.innerHTML = Math.max(0, employees.length - 1);
-    }
-
-    // Update recent invoices (mock data)
-    const recentInvoicesElement = document.getElementById('recentInvoices');
-    if (recentInvoicesElement) {
-      const invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-      recentInvoicesElement.innerHTML = invoices.length;
-    }
-
-  } catch (error) {
-    console.error('Error updating dashboard stats:', error);
-  }
-}
-
-// Initialize notification container
+// Initialize notification container on load
 document.addEventListener('DOMContentLoaded', function() {
   if (!document.getElementById('notificationContainer')) {
-    const container = document.createElement('div');
-    container.id = 'notificationContainer';
-    container.className = 'notification-container';
-    document.body.appendChild(container);
+    createNotificationContainer();
   }
 });
